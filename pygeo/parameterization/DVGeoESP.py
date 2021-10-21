@@ -7,7 +7,7 @@ import time
 import numpy as np
 from collections import OrderedDict
 from mpi4py import MPI
-from pyOCSM import pyOCSM
+from pyOCSM import ocsm
 from contextlib import contextmanager
 from baseclasses.utils import Error
 
@@ -45,18 +45,15 @@ def stdout_redirected(flag, to=os.devnull):
 class DVGeometryESP:
     """
     A class for manipulating Engineering Sketchpad (ESP) geometry
-    The purpose of the DVGeometryESP class is to provide translation
-    of the ESP geometry engine to externally supplied surfaces. This
-    allows the use of ESP design parameters to control the MACH
-    framework.
-    There are several import limitations:
-    1. Since ESP is surface based only, it cannot be used to
-    parameterize a geometry that doesn't lie on the surface.
-    Structural members need to be directly modeled in ESP as surfaces.
-    2. It cannot handle *moving* intersection. A geometry with static
-    intersections is fine as long as the intersection doesn't move
-    3. It does not support complex numbers for the complex-step
-    method.
+
+    The purpose of the DVGeometryESP class is to provide translation of the ESP geometry engine to externally supplied surfaces.
+    This allows the use of ESP design parameters to control the MACH framework.
+
+    There are several important limitations:
+    1. Since ESP is surface based only, it cannot be used to parameterize a geometry that doesn't lie on the surface.
+        Structural members need to be directly modeled in ESP as surfaces.
+    2. It cannot handle *moving* intersection. A geometry with static intersections is fine as long as the intersection doesn't move.
+    3. It does not support complex numbers for the complex-step method.
     4. It does not surpport separate configurations.
 
     Parameters
@@ -64,38 +61,49 @@ class DVGeometryESP:
     espFile : str
        filename of .csm file containing the parameterized CAD
     comm : MPI Intra Comm
-       Comm on which to build operate the object. This is used to
-       perform embarasisngly parallel finite differencing. Defaults to
-       MPI.COMM_WORLD.
+       Comm on which to build operate the object
+       This is used to perform embarassisngly parallel finite differencing
+       Defaults to MPI.COMM_WORLD
     scale : float
-       A global scale factor from the ESP geometry to incoming (CFD) mesh
-       geometry. For example, if the ESP model is in inches, and the CFD
-       in meters, scale=0.0254.
+       A global scale factor from the ESP geometry to incoming (CFD) mesh geometry
+       For example, if the ESP model is in inches, and the CFD in meters, scale=0.0254
     bodies : list of strings
-       A list of the names of the ESP bodies to consider.
-       They need to be on the top of the ESP body stack (i.e., visible
-       in the ESP user interface when all the branches are built)
+       A list of the names of the ESP bodies to consider
+       They need to be on the top of the ESP body stack (i.e., visible in the ESP user interface when all the branches are built)
     projTol : float
         The maximum allowable error between point sets and the projected points
-        If exceeded, returns an error during addPointSet.
+        If exceeded, returns an error during addPointSet
         Default 0.01
+    debug : bool
+
+        Default False
     maxproc : int
         Maximum number of processors to use in the finite difference.
         Default no limit
     suppress_stdout : bool
-        Suppress console output from ESP. Default False
+        Suppress console output from ESP.
+        Default False
     exclude_edge_projections : bool
         Disallow projections to edges in the ESP topology (only allow surfaces)
         This can sometimes fix weird mesh deformation issues near the mesh boundaries
         Default False
+    ulimits :
+
+    vlimits :
+
 
     Examples
     --------
-    The general sequence of operations for using DVGeometry is as follows:
-      >>> from pygeo import *
-      >>> DVGeo = DVGeometryESP("wing.csm", MPI_COMM_WORLD)
+    The general sequence of operations for using DVGeometryESP is as follows:
+
+      >>> from pygeo import DVGeometryESP
+      >>> DVGeo = DVGeometryESP("csmFile.csm", MPI_COMM_WORLD)
+
       >>> # Add a set of coordinates Xpt into the object
       >>> DVGeo.addPointSet(Xpt, 'myPoints')
+
+      >>> # add a design variable present in the csm
+      >>> DVGeo.addVariable("var", lower=0.0, upper=1.0)
       >>>
     """
 
@@ -117,22 +125,27 @@ class DVGeometryESP:
         if comm.rank == 0:
             print("Initializing DVGeometryESP")
             t0 = time.time()
+
         self.maxproc = maxproc
         self.esp = True
         self.points = OrderedDict()
         self.pointSets = OrderedDict()
         self.updated = {}
         self.updatedJac = {}
-        self.globalDVList = (
-            []
-        )  # will become a list of tuples with (DVName, localIndex) - used for finite difference load balancing
+
+        # will become a list of tuples with (DVName, localIndex) - used for finite difference load balancing
+        self.globalDVList = []
         self.suppress_stdout = suppress_stdout
         self.exclude_edge_projections = exclude_edge_projections
+
         # this scales coordinates from esp to mesh geometry
         self.espScale = scale
+
         # and this scales coordinates from mesh to esp geometry
         self.meshScale = 1.0 / scale
-        self.projTol = projTol * self.meshScale  # default input is in meters.
+        self.projTol = projTol * self.meshScale  # default input is in meters
+        # TODO is ESP in a specific unit?
+
         if ulimits is not None:
             self.ulimits = ulimits
         else:
@@ -141,19 +154,24 @@ class DVGeometryESP:
             self.vlimits = vlimits
         else:
             self.vlimits = np.array([-99999.0, 99999.0])
+        # TODO why is this set here and not in the constructor
+
         self.comm = comm
         self.espFile = espFile
         self.debug = debug
 
         t1 = time.time()
         # read the model
-        self.espModel = pyOCSM.Ocsm(self.espFile)
-        pyOCSM.SetOutLevel(0)
+        self.espModel = ocsm.Ocsm(self.espFile)
+        ocsm.SetOutLevel(0)
+
         # build the baseline model
         if self.comm.rank == 0:
-            pyOCSM.SetOutLevel(0)
+            ocsm.SetOutLevel(0)
         else:
-            pyOCSM.SetOutLevel(0)
+            ocsm.SetOutLevel(0)
+        # TODO what does this do, doesn't it always happen
+
         self.num_branches_baseline, _, allBodyIndices = self.espModel.Build(
             0, 200
         )  # pick 200 as arbitrary large number of bodies to allocate
@@ -201,24 +219,27 @@ class DVGeometryESP:
                 pmtrIndex += 1
                 pmtrType, numRow, numCol, pmtrName = self.espModel.GetPmtr(pmtrIndex)
                 baseValue = np.zeros(numRow * numCol)
+
                 for rowIdx in range(numRow):
                     for colIdx in range(numCol):
                         try:
                             baseValue[colIdx + numCol * rowIdx] = self.espModel.GetValu(
                                 pmtrIndex, rowIdx + 1, colIdx + 1
                             )[0]
-                        except pyOCSM.OcsmError as e:
+                        except ocsm.OcsmError as e:
                             if e.value == "ILLEGAL_PTMR_INDEX":
                                 # I don't think we should ever make it here if the GetPmtr check is correct
                                 raise Error("Column or row index out of range in design parameter " + pmtrName)
 
                 if pmtrType == ocsmExternal:
                     self.csmDesPmtrs[pmtrName] = ESPParameter(pmtrName, pmtrIndex, numRow, numCol, baseValue)
-            except pyOCSM.OcsmError as e:
+
+            except ocsm.OcsmError as e:
                 if e.value == "ILLEGAL_PMTR_INDEX":
                     pmtrsleft = False
                 else:
                     raise e
+
         if pmtrIndex == 1:
             if comm.rank == 0:
                 print("DVGeometryESP Warning: no design parameters defined in the CSM file")
@@ -230,37 +251,27 @@ class DVGeometryESP:
     def addPointSet(self, points, ptName, distributed=True, cache_projections=False, **kwargs):
         """
         Add a set of coordinates to DVGeometry
-        The is the main way that geometry, in the form of a coordinate
-        list is given to DVGeoemtry to be manipulated.
+        The is the main way that geometry, in the form of a coordinate list, is given to DVGeoemtry to be manipulated.
 
         Parameters
         ----------
         points : array, size (N,3)
-            The coordinates to embed. These cordinates *should* all
-            project into the interior of the FFD volume.
+            The coordinates to embed
+            These cordinates *should* all project into the interior of the FFD volume
         ptName : str
-            A user supplied name to associate with the set of
-            coordinates. Thisname will need to be provided when
-            updating the coordinates or when getting the derivatives
-            of the coordinates.
+            A user supplied name to associate with the set of coordinates
+            This name will need to be provided when updating the coordinates or when getting the derivatives of the coordinates
         distributed : bool
-            Whether the pointset is distributed (different each proc)
-            or non-distributed (duplicated and identical each proc)
-            Should be set to false for duplicated pointsets to avoid
-            very poor parallel scaling in the derivatives routine.
+            Whether the pointset is distributed (different each proc) or non-distributed (duplicated and identical each proc)
+            Should be set to false for duplicated pointsets to avoid very poor parallel scaling in the derivatives routine
         cache_projections : None or str
-            The user can optionally cache the point set projections
-            to save initialization time. If a filename is provided,
-            the cached u v t coordinates will be saved in numpy compressed
-            format ('.npz' extension should be used).
-            The points will be validated to ensure that the projections
-            remain within tolerance of the model and if not, the projections
-            will be recreated.
+            The user can optionally cache the point set projections to save initialization time
+            If a filename is provided, the cached u v t coordinates will be saved in numpy compressed format ('.npz' extension should be used)
+            The points will be validated to ensure that the projections remain within tolerance of the model and if not, the projections will be recreated
         """
 
         # save this name so that we can zero out the jacobians properly
-        self.points[ptName] = True  # ADFlow checks self.points to see
-        # if something is added or not.
+        self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
         points = np.array(points).real.astype("d")
 
         # check that duplicated pointsets are actually the same length
@@ -471,12 +482,12 @@ class DVGeometryESP:
                         # try to match point on edges first
                         with stdout_redirected(self.suppress_stdout):
                             # get the parametric coordinate along the edge
-                            ttemp = self.espModel.GetUV(bodyIndex, pyOCSM.EDGE, edgeIndex, 1, truexyz.tolist())
+                            ttemp = self.espModel.GetUV(bodyIndex, ocsm.EDGE, edgeIndex, 1, truexyz.tolist())
                             # get the xyz location of the newly projected point
-                            xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, pyOCSM.EDGE, edgeIndex, 1, ttemp))
+                            xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, ocsm.EDGE, edgeIndex, 1, ttemp))
                         dist_temp = np.sum((truexyz - xyztemp) ** 2)
                         ttemp = ttemp[0]
-                        tlimits = self._getUVLimits(bodyIndex, pyOCSM.EDGE, edgeIndex)
+                        tlimits = self._getUVLimits(bodyIndex, ocsm.EDGE, edgeIndex)
                         if not (ttemp < tlimits[0] - rejectuvtol or ttemp > tlimits[1] + rejectuvtol):
                             if dist_temp < dist_best:
                                 tlimits_best = tlimits
@@ -489,14 +500,14 @@ class DVGeometryESP:
                 for faceIndex in range(1, nFaces + 1):
                     with stdout_redirected(self.suppress_stdout):
                         # get the projected points on the ESP surface in UV coordinates
-                        uvtemp = self.espModel.GetUV(bodyIndex, pyOCSM.FACE, faceIndex, 1, truexyz.tolist())
+                        uvtemp = self.espModel.GetUV(bodyIndex, ocsm.FACE, faceIndex, 1, truexyz.tolist())
                         # get the XYZ location of the newly projected points
-                        xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, pyOCSM.FACE, faceIndex, 1, uvtemp))
+                        xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, ocsm.FACE, faceIndex, 1, uvtemp))
                     dist_temp = np.sum((truexyz - xyztemp) ** 2)
                     # validate u and v
                     utemp = uvtemp[0]
                     vtemp = uvtemp[1]
-                    uvlimits = self._getUVLimits(bodyIndex, pyOCSM.FACE, faceIndex)
+                    uvlimits = self._getUVLimits(bodyIndex, ocsm.FACE, faceIndex)
                     if not (
                         utemp < uvlimits[0] - rejectuvtol
                         or utemp > uvlimits[1] + rejectuvtol
@@ -596,8 +607,7 @@ class DVGeometryESP:
 
     def setDesignVars(self, dvDict, updateJacobian=True):
         """
-        Standard routine for setting design variables from a design
-        variable dictionary.
+        Standard routine for setting design variables from a design variable dictionary.
 
         Parameters
         ----------
@@ -1035,7 +1045,7 @@ class DVGeometryESP:
         ibody : int
             Body index
         seltype : int
-            pyOCSM.EDGE or pyOCSM.FACE
+            ocsm.EDGE or ocsm.FACE
         iselect : int
             Index of edge or face
 
@@ -1164,18 +1174,18 @@ class DVGeometryESP:
                 # get the point from an edge
                 # get upper and lower parametric limits of updated model
                 tlim0 = tlimits0[ptidx]
-                tlim = self._getUVLimits(bid, pyOCSM.EDGE, eid)
+                tlim = self._getUVLimits(bid, ocsm.EDGE, eid)
                 trange0 = tlim0[1] - tlim0[0]
                 trange = tlim[1] - tlim[0]
                 tnew = (t[ptidx] - tlim0[0]) * trange / trange0 + tlim[0]
-                points[ptidx, :] = self.espModel.GetXYZ(bid, pyOCSM.EDGE, eid, 1, [tnew])
+                points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.EDGE, eid, 1, [tnew])
             else:
                 # point from a face
                 if fid == -1:
                     raise ValueError("both edge ID and face ID are unset")
                 # get the upper and lower uv limits of the updated model
                 uvlim0 = uvlimits0[ptidx]
-                uvlim = self._getUVLimits(bid, pyOCSM.FACE, fid)
+                uvlim = self._getUVLimits(bid, ocsm.FACE, fid)
                 urange0 = uvlim0[1] - uvlim0[0]
                 vrange0 = uvlim0[3] - uvlim0[2]
                 urange = uvlim[1] - uvlim[0]
@@ -1183,7 +1193,7 @@ class DVGeometryESP:
                 # scale the input uv points according to the original uv limits
                 unew = (u[ptidx] - uvlim0[0]) * urange / urange0 + uvlim[0]
                 vnew = (v[ptidx] - uvlim0[2]) * vrange / vrange0 + uvlim[2]
-                points[ptidx, :] = self.espModel.GetXYZ(bid, pyOCSM.FACE, fid, 1, [unew, vnew])
+                points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.FACE, fid, 1, [unew, vnew])
         points = points * self.espScale
         return points
 
