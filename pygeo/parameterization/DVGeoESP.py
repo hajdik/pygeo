@@ -762,7 +762,7 @@ class DVGeometryESP:
 
     def totalSensitivity(self, dIdpt, ptSetName, comm=None, config=None):
         r"""
-        This function computes sensitivty information.
+        This function computes sensitivity information.
         Specificly, it computes the following:
         :math:`\frac{dI}{d_{pt}}\frac{dX_{pt}}{dX_{DV}}`
 
@@ -850,7 +850,7 @@ class DVGeometryESP:
 
     def totalSensitivityProd(self, vec, ptSetName, comm=None, config=None):
         r"""
-        This function computes sensitivty information.
+        This function computes sensitivity information.
         Specificly, it computes the following:
         :math:`\frac{dX_{pt}}{dX_{DV}} \vec'`
 
