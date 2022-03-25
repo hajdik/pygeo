@@ -10,6 +10,8 @@ from mpi4py import MPI
 from pyOCSM import ocsm
 from contextlib import contextmanager
 from baseclasses.utils import Error
+import matplotlib.pyplot as plt
+from pyspline.utils import openTecplot, closeTecplot, writeTecplot1D, writeTecplot3D
 
 
 @contextmanager
@@ -421,6 +423,18 @@ class DVGeometryESP:
                 # go through and check that each point projects
                 # within tolerance or else invalidate the cached values
                 proj_pts = self._evaluatePoints(ul, vl, tl, uvliml, tliml, bodyIDl, faceIDl, edgeIDl, nPts)
+
+                # plt.scatter(
+                #     proj_pts[:, 0],
+                #     proj_pts[:, 1],
+                #     color="g",
+                # )
+                # plt.scatter(ul, vl, color="b")
+                # plt.ylim([0.1, -0.1])
+                # plt.xlim([0, 1])
+                # plt.title("dvgeo proj_pts, ul vl in addPointSet")
+                # plt.show()
+
                 if points.shape[0] == 0:
                     # empty pointset can occur for some distributed pointsets
                     dMax_local = 0.0
@@ -564,6 +578,19 @@ class DVGeometryESP:
             points, proj_pts, bodyIDArray, faceIDArray, edgeIDArray, uv, t, uvlimArray, tlimArray, distributed
         )
 
+        # plt.scatter(
+        #     self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
+        #     self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
+        #     color="y",
+        #     label="proj_pts",
+        # )
+        # plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b", label="u,v")
+        # plt.ylim([0.1, -0.1])
+        # plt.xlim([0, 1])
+        # plt.title("self.pointSets['adflow_fc_coords'] in end of addPointSet")
+        # plt.legend()
+        # plt.show()
+
         # Set the updated flag to false because the jacobian is not up to date.
         self.updated[ptName] = False
         self.updatedJac[ptName] = False
@@ -617,6 +644,18 @@ class DVGeometryESP:
             additional keys in the dfvdictionary are simply ignored.
         """
 
+        # if "adflow_fc_coords" in self.pointSets:
+        #     plt.scatter(
+        #         self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
+        #         self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
+        #         color="g",
+        #     )
+        #     plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b")
+        #     plt.ylim([0.1, -0.1])
+        #     plt.xlim([0, 1])
+        #     plt.title("dvgeo pointsets.proj_pts, uv in beg setDV")
+        #     plt.show()
+
         # Just dump in the values
         for key in dvDict:
             if key in self.DVs:
@@ -644,6 +683,7 @@ class DVGeometryESP:
         if not updateJacobian:
             for ptName in self.pointSets:
                 self.updatedJac[ptName] = False
+
         return built_successfully
 
     def writeCADFile(self, filename):
@@ -656,6 +696,21 @@ class DVGeometryESP:
                 + " must have a valid exension. "
                 + "Consult the EngineeringSketchPad docs for the DUMP function"
             )
+        if self.comm.rank == 0:
+            modelCopy = self.espModel.Copy()
+            n_branches, _, _ = modelCopy.Info()
+            modelCopy.NewBrch(
+                n_branches, modelCopy.GetCode("dump"), "<none>", 0, filename, "0", "0", "", "", "", "", "", ""
+            )
+            modelCopy.Build(0, 0)
+
+    def writePlotFile(self, filename):
+        valid_filetypes = ["plot"]
+        file_extension = filename.split(".")[-1]
+
+        if file_extension.lower() not in valid_filetypes:
+            raise OSError(".plot extension necessary to output text file")
+
         if self.comm.rank == 0:
             modelCopy = self.espModel.Copy()
             n_branches, _, _ = modelCopy.Info()
@@ -696,6 +751,13 @@ class DVGeometryESP:
 
         # this returns the current projection point coordinates
         newPts = self.pointSets[ptSetName].proj_pts
+        # this is going crazy with the change in coeff - when does it get changed?
+
+        # plt.scatter(newPts[:, 0], newPts[:, 1])  # this is just the oml
+        # plt.ylim([0.1, -0.1])
+        # plt.xlim([0, 1])
+        # plt.title("dvgeo pointsets.proj_pts in update")  # something is going wrong right before here!!!
+        # plt.show()
 
         if not self.updated[ptSetName]:
             # get the offset between points and original projected points
@@ -714,6 +776,14 @@ class DVGeometryESP:
 
             # Finally flag this pointSet as being up to date:
             self.updated[ptSetName] = True
+
+            # plt.scatter(newPts[:, 0], newPts[:, 1])  # this is just the oml
+            # plt.ylim([0.1, -0.1])
+            # plt.xlim([0, 1])
+            # plt.title(
+            #     "dvgeo updated! pointsets.proj_pts in update with delta"
+            # )  # something is going wrong right before here!!!
+            # plt.show()
 
         return newPts
 
@@ -1031,6 +1101,151 @@ class DVGeometryESP:
             dv = self.DVs[dvName]
             optProb.addVarGroup(dv.name, dv.nVal, "c", value=dv.value, lower=dv.lower, upper=dv.upper, scale=dv.scale)
 
+    def demoDesignVars(self, directory, pointSet=None, CFDSolver=None, callBack=None, freq=2):
+        """
+        This function can be used to "test" the design variable parametrization
+        for a given optimization problem. It should be called in the script
+        after DVGeo has been set up. The function will loop through all the
+        design variables and write out a deformed FFD volume for the upper
+        and lower bound of every design variable. It can also write out
+        deformed point sets and surface meshes.
+        Note: this function has no need for includeLocal and includeGlobal as DVGeoESP has no distinction.
+
+        Parameters
+        ----------
+        directory : str
+            The directory where the files should be written.
+        pointSet : str
+            Name of the point set to write out.
+            If None, no point set output is generated.
+        CFDSolver : str
+            An ADflow instance that will be used to write out deformed surface
+            meshes. In addition to having a DVGeo object, CFDSolver must have
+            an AeroProblem set, for example with ``CFDSolver.setAeroProblem(ap)``.
+            If CFDSolver is None, no surface mesh output is generated.
+        callBack : function
+            This allows the user to perform an additional task at each new design
+            variable iteration. The callback function must take two inputs:
+
+            1. the output directory name (str) and
+            2. the iteration count (int).
+        freq : int
+            Number of snapshots to take between the upper and lower bounds of
+            a given variable. If greater than 2, will do a sinusoidal sweep.
+        """
+        # Generate directories
+        os.makedirs(f"{directory}/csm", exist_ok=True)
+        os.makedirs(f"{directory}/cad", exist_ok=True)
+        os.makedirs(f"{directory}/txt", exist_ok=True)
+
+        if pointSet is not None:
+            os.makedirs(f"{directory}/pointset", exist_ok=True)
+        if CFDSolver is not None:
+            os.makedirs(f"{directory}/surf", exist_ok=True)
+
+        # Get design variables
+        dvDict = self.getValues()
+        failures = []
+
+        # Loop through design variables on self
+        for key in dvDict:
+            lower = []
+            upper = []
+
+            # get the ranges of DVs for this model, we have no global/local distinction
+            lower = self.DVs[key].lower
+            upper = self.DVs[key].upper
+
+            if lower is None or upper is None:
+                raise Error("demoDesignVars requires upper and lower bounds on all design variables.")
+
+            x = dvDict[key].flatten()
+            nDV = len(lower)
+            for j in range(nDV):
+                count = 0
+                if freq == 2:
+                    stops = [lower[j], upper[j]]
+                elif freq > 2:
+                    sinusoid = np.sin(np.linspace(0, np.pi, freq))
+                    down_swing = x[j] + (lower[j] - x[j]) * sinusoid
+                    up_swing = x[j] + (upper[j] - x[j]) * sinusoid
+                    stops = np.concatenate((down_swing[:-1], up_swing[:-1]))
+
+                for val in stops:
+                    # Add perturbation to the design variable and update
+                    old_val = x[j]
+                    x[j] = val
+                    dvDict.update({key: x})
+
+                    print(f"\nDemo DV {key} {j} with{str(dvDict)}\n")
+
+                    # make sure the ESP model can actually build with the given DVs
+                    # if not, add the DVs to a list to output in failures.txt and skip the rest
+                    built = self.setDesignVars(dvDict, updateJacobian=False)
+                    if not built:
+                        print(f"Design variables {str(dvDict)} resulted in a failed model. Skipping to next stop")
+                        # is this the cleanest way to do it? no. does it avoid importing copy.deepcopy? yes.
+                        failures.append(str(dvDict))
+
+                    else:
+                        # Set output filename
+                        outFile = f"{key}_{j:03d}_iter_{count:03d}"
+
+                        # Write the ESP model to .csm, an ASCII file to .plot, and a CAD file
+                        # self.writeCSMFile(f"{directory}/csm/{outFile}.csm")
+                        # self.writePlotFile(f"{directory}/txt/{outFile}.plot")
+                        # self.writeCADFile(f"{directory}/cad/{outFile}.iges")
+
+                        # Write point set
+                        if pointSet is not None:
+                            self.update(pointSet)
+                            self.writePointSet(pointSet, f"{directory}/pointset/{outFile}")
+
+                        # Write surface mesh
+                        if CFDSolver is not None:
+                            CFDSolver.DVGeo.setDesignVars(dvDict, updateJacobian=False)
+                            CFDSolver.setAeroProblem(CFDSolver.curAP)
+                            CFDSolver.writeSurfaceSolutionFileTecplot(f"{directory}/surf/{outFile}")
+
+                        # Call user function
+                        if callBack is not None:
+                            callBack(directory, count)
+
+                    # Reset variable
+                    x[j] = old_val
+                    dvDict.update({key: x})
+
+                    # Iterate counter
+                    count += 1
+
+        # output failed sets of DVs to failures.txt if there were any
+        if failures is not None:
+            with open(f"{directory}/failures.txt", "w") as f:
+                for fail in failures:
+                    print(f"{fail}\n", file=f)
+
+        # Reset DVs to their original values
+        self.setDesignVars(dvDict, updateJacobian=False)
+
+    def writePointSet(self, name, fileName):
+        """
+        Write a given point set to a tecplot file
+
+        Parameters
+        ----------
+        name : str
+             The name of the point set to write to a file
+
+        fileName : str
+           Filename for tecplot file. Should have no extension, an
+           extension will be added
+        """
+        coords = self.update(name)
+        fileName = fileName + "_%s.dat" % name
+        f = openTecplot(fileName, 3)
+        writeTecplot1D(f, name, coords)
+        closeTecplot(f)
+
     # # ----------------------------------------------------------------------
     # #        THE REMAINDER OF THE FUNCTIONS NEED NOT BE CALLED BY THE USER
     # # ----------------------------------------------------------------------
@@ -1157,13 +1372,22 @@ class DVGeometryESP:
         # matches the number when the model was first built on __init__
         # otherwise, there was an EGADS/CSM build failure at this design point
         if outtuple[0] != self.num_branches_baseline:
+            print("\n-----------------bad---------------\n")
             return False
         else:
             # built correctly
+            print("\n-----------------good---------------\n")
             return True
 
     def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts):
         points = np.zeros((nPts, 3))
+
+        # plt.scatter(u, v)  # this is just the oml
+        # plt.ylim([0.1, -0.1])
+        # plt.xlim([0, 1])
+        # plt.title("dvgeo u v  in _evaluatePoints")  # the u, v is wrong coming into this on the second pass
+        # plt.show()
+
         for ptidx in range(nPts):
             # check if on an edge or surface
             bid = bodyID[ptidx]
@@ -1195,14 +1419,34 @@ class DVGeometryESP:
                 vnew = (v[ptidx] - uvlim0[2]) * vrange / vrange0 + uvlim[2]
                 points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.FACE, fid, 1, [unew, vnew])
         points = points * self.espScale
+
+        # plt.scatter(points[:, 0], points[:, 1])
+        # plt.ylim([0.1, -0.1])
+        # plt.xlim([0, 1])
+        # plt.title("dvgeo points in _evaluatePoints")
+        # plt.show()
+
         return points
 
     def _updateProjectedPts(self):
         # for each pointset
         # run getxyz and obtain new projected_pts
         # update the proj_pts
+
         for pointSetName in self.pointSets:
             pointSet = self.pointSets[pointSetName]
+
+            # plt.scatter(
+            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
+            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
+            #     color="g",
+            # )
+            # plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b")
+            # plt.ylim([0.1, -0.1])
+            # plt.xlim([0, 1])
+            # plt.title("dvgeo pointset.proj_points, uv in _updateProjPts BEFORE _evalPts")  # these points are fine
+            # plt.show()
+
             proj_pts = self._evaluatePoints(
                 pointSet.u,
                 pointSet.v,
@@ -1215,6 +1459,17 @@ class DVGeometryESP:
                 pointSet.nPts,
             )
             pointSet.proj_pts = proj_pts
+
+            # plt.scatter(
+            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
+            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
+            #     color="g",
+            # )
+            # plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b")
+            # plt.ylim([0.1, -0.1])
+            # plt.xlim([0, 1])
+            # plt.title("dvgeo pointset.proj_points, uv in _updateProjPts AFTER _evalPts")
+            # plt.show()
 
     def _allgatherCoordinates(self, ul, vl, tl, faceIDl, bodyIDl, edgeIDl, uvlimitsl, tlimitsl):
         # create the arrays to receive the global info
