@@ -10,7 +10,6 @@ from mpi4py import MPI
 from pyOCSM import ocsm
 from contextlib import contextmanager
 from baseclasses.utils import Error
-import matplotlib.pyplot as plt
 from pyspline.utils import openTecplot, closeTecplot, writeTecplot1D, writeTecplot3D
 
 
@@ -56,7 +55,7 @@ class DVGeometryESP:
         Structural members need to be directly modeled in ESP as surfaces.
     2. It cannot handle *moving* intersection. A geometry with static intersections is fine as long as the intersection doesn't move.
     3. It does not support complex numbers for the complex-step method.
-    4. It does not surpport separate configurations.
+    4. It does not support separate configurations.
 
     Parameters
     ----------
@@ -424,17 +423,6 @@ class DVGeometryESP:
                 # within tolerance or else invalidate the cached values
                 proj_pts = self._evaluatePoints(ul, vl, tl, uvliml, tliml, bodyIDl, faceIDl, edgeIDl, nPts)
 
-                # plt.scatter(
-                #     proj_pts[:, 0],
-                #     proj_pts[:, 1],
-                #     color="g",
-                # )
-                # plt.scatter(ul, vl, color="b")
-                # plt.ylim([0.1, -0.1])
-                # plt.xlim([0, 1])
-                # plt.title("dvgeo proj_pts, ul vl in addPointSet")
-                # plt.show()
-
                 if points.shape[0] == 0:
                     # empty pointset can occur for some distributed pointsets
                     dMax_local = 0.0
@@ -578,19 +566,6 @@ class DVGeometryESP:
             points, proj_pts, bodyIDArray, faceIDArray, edgeIDArray, uv, t, uvlimArray, tlimArray, distributed
         )
 
-        # plt.scatter(
-        #     self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
-        #     self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
-        #     color="y",
-        #     label="proj_pts",
-        # )
-        # plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b", label="u,v")
-        # plt.ylim([0.1, -0.1])
-        # plt.xlim([0, 1])
-        # plt.title("self.pointSets['adflow_fc_coords'] in end of addPointSet")
-        # plt.legend()
-        # plt.show()
-
         # Set the updated flag to false because the jacobian is not up to date.
         self.updated[ptName] = False
         self.updatedJac[ptName] = False
@@ -643,18 +618,6 @@ class DVGeometryESP:
             must correspond to the design variable names. Any
             additional keys in the dfvdictionary are simply ignored.
         """
-
-        # if "adflow_fc_coords" in self.pointSets:
-        #     plt.scatter(
-        #         self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
-        #         self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
-        #         color="g",
-        #     )
-        #     plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b")
-        #     plt.ylim([0.1, -0.1])
-        #     plt.xlim([0, 1])
-        #     plt.title("dvgeo pointsets.proj_pts, uv in beg setDV")
-        #     plt.show()
 
         # Just dump in the values
         for key in dvDict:
@@ -751,13 +714,6 @@ class DVGeometryESP:
 
         # this returns the current projection point coordinates
         newPts = self.pointSets[ptSetName].proj_pts
-        # this is going crazy with the change in coeff - when does it get changed?
-
-        # plt.scatter(newPts[:, 0], newPts[:, 1])  # this is just the oml
-        # plt.ylim([0.1, -0.1])
-        # plt.xlim([0, 1])
-        # plt.title("dvgeo pointsets.proj_pts in update")  # something is going wrong right before here!!!
-        # plt.show()
 
         if not self.updated[ptSetName]:
             # get the offset between points and original projected points
@@ -776,14 +732,6 @@ class DVGeometryESP:
 
             # Finally flag this pointSet as being up to date:
             self.updated[ptSetName] = True
-
-            # plt.scatter(newPts[:, 0], newPts[:, 1])  # this is just the oml
-            # plt.ylim([0.1, -0.1])
-            # plt.xlim([0, 1])
-            # plt.title(
-            #     "dvgeo updated! pointsets.proj_pts in update with delta"
-            # )  # something is going wrong right before here!!!
-            # plt.show()
 
         return newPts
 
@@ -1190,7 +1138,7 @@ class DVGeometryESP:
                     else:
                         # Set output filename
                         outFile = f"{key}_{j:03d}_iter_{count:03d}"
-
+                        # TODO add options for these
                         # Write the ESP model to .csm, an ASCII file to .plot, and a CAD file
                         # self.writeCSMFile(f"{directory}/csm/{outFile}.csm")
                         # self.writePlotFile(f"{directory}/txt/{outFile}.plot")
@@ -1372,21 +1320,13 @@ class DVGeometryESP:
         # matches the number when the model was first built on __init__
         # otherwise, there was an EGADS/CSM build failure at this design point
         if outtuple[0] != self.num_branches_baseline:
-            print("\n-----------------bad---------------\n")
             return False
         else:
             # built correctly
-            print("\n-----------------good---------------\n")
             return True
 
     def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts):
         points = np.zeros((nPts, 3))
-
-        # plt.scatter(u, v)  # this is just the oml
-        # plt.ylim([0.1, -0.1])
-        # plt.xlim([0, 1])
-        # plt.title("dvgeo u v  in _evaluatePoints")  # the u, v is wrong coming into this on the second pass
-        # plt.show()
 
         for ptidx in range(nPts):
             # check if on an edge or surface
@@ -1420,12 +1360,6 @@ class DVGeometryESP:
                 points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.FACE, fid, 1, [unew, vnew])
         points = points * self.espScale
 
-        # plt.scatter(points[:, 0], points[:, 1])
-        # plt.ylim([0.1, -0.1])
-        # plt.xlim([0, 1])
-        # plt.title("dvgeo points in _evaluatePoints")
-        # plt.show()
-
         return points
 
     def _updateProjectedPts(self):
@@ -1435,17 +1369,6 @@ class DVGeometryESP:
 
         for pointSetName in self.pointSets:
             pointSet = self.pointSets[pointSetName]
-
-            # plt.scatter(
-            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
-            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
-            #     color="g",
-            # )
-            # plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b")
-            # plt.ylim([0.1, -0.1])
-            # plt.xlim([0, 1])
-            # plt.title("dvgeo pointset.proj_points, uv in _updateProjPts BEFORE _evalPts")  # these points are fine
-            # plt.show()
 
             proj_pts = self._evaluatePoints(
                 pointSet.u,
@@ -1459,17 +1382,6 @@ class DVGeometryESP:
                 pointSet.nPts,
             )
             pointSet.proj_pts = proj_pts
-
-            # plt.scatter(
-            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 0],
-            #     self.pointSets["adflow_fc_coords"].proj_pts[:, 1],
-            #     color="g",
-            # )
-            # plt.scatter(self.pointSets["adflow_fc_coords"].u, self.pointSets["adflow_fc_coords"].v, color="b")
-            # plt.ylim([0.1, -0.1])
-            # plt.xlim([0, 1])
-            # plt.title("dvgeo pointset.proj_points, uv in _updateProjPts AFTER _evalPts")
-            # plt.show()
 
     def _allgatherCoordinates(self, ul, vl, tl, faceIDl, bodyIDl, edgeIDl, uvlimitsl, tlimitsl):
         # create the arrays to receive the global info
