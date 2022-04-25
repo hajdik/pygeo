@@ -131,6 +131,10 @@ class DVGeometryESP(DVGeoSketch):
         self.suppress_stdout = suppress_stdout
         self.exclude_edge_projections = exclude_edge_projections
 
+        # Jacobians:
+        self.JT = {}
+        self.nPts = {}
+
         if ulimits is not None:
             self.ulimits = ulimits
         else:
@@ -846,7 +850,7 @@ class DVGeometryESP(DVGeoSketch):
 
         return dPt
 
-    def computeDVJacobian(self, config=None):
+    def computeDVJacobian(self):
         """
         return J_temp for a given config
         """
@@ -854,20 +858,11 @@ class DVGeometryESP(DVGeoSketch):
         # pass information down one level for the next pass call from the routine above
 
         # This is going to be DENSE in general
-        J_attach = self._attachedPtJacobian(config=config)
-
-        # Compute local normal jacobian
-        J_spanwiselocal = self._spanwiselocalDVJacobian(config=config)
-
-        # Compute local normal jacobian
-        J_sectionlocal = self._sectionlocalDVJacobian(config=config)
+        J_attach = self._attachedPtJacobian()
 
         # This is the sparse jacobian for the local DVs that affect
         # Control points directly.
-        J_local = self._localDVJacobian(config=config)
-
-        # this is the jacobian from accumulated derivative dependence from parent to child
-        J_casc = self._cascadedDVJacobian(config=config)
+        J_local = self._localDVJacobian()
 
         J_temp = None
 
@@ -875,33 +870,15 @@ class DVGeometryESP(DVGeoSketch):
         if J_attach is not None:
             J_temp = sparse.lil_matrix(J_attach)
 
-        if J_spanwiselocal is not None:
-            if J_temp is None:
-                J_temp = sparse.lil_matrix(J_spanwiselocal)
-            else:
-                J_temp += J_spanwiselocal
-
-        if J_sectionlocal is not None:
-            if J_temp is None:
-                J_temp = sparse.lil_matrix(J_sectionlocal)
-            else:
-                J_temp += J_sectionlocal
-
         if J_local is not None:
             if J_temp is None:
                 J_temp = sparse.lil_matrix(J_local)
             else:
                 J_temp += J_local
 
-        if J_casc is not None:
-            if J_temp is None:
-                J_temp = sparse.lil_matrix(J_casc)
-            else:
-                J_temp += J_casc
-
         return J_temp
 
-    def computeTotalJacobian(self, ptSetName, config=None):
+    def computeTotalJacobian(self, ptSetName):
         """
         Return the total point jacobian in CSR format since we need this for TACS
         """
@@ -915,7 +892,7 @@ class DVGeometryESP(DVGeoSketch):
 
         # compute the derivatives of the coefficients of this level wrt all of the design
         # variables at this level and all levels above
-        J_temp = self.computeDVJacobian(config=config)
+        J_temp = self.computeDVJacobian()
 
         # now get the derivative of the points for this level wrt the coefficients(dPtdCoef)
         if self.FFD.embeddedVolumes[ptSetName].dPtdCoef is not None:
@@ -944,7 +921,7 @@ class DVGeometryESP(DVGeoSketch):
             Nrow = dPtdCoef.shape[0] * 3
             Ncol = dPtdCoef.shape[1] * 3
 
-            # Create new matrix in coo-dinate format and convert to csr
+            # Create new matrix in coordinate format and convert to csr
             new_dPtdCoef = sparse.coo_matrix((new_data, (new_row, new_col)), shape=(Nrow, Ncol)).tocsr()
 
             # Do Sparse Mat-Mat multiplication and resort indices
@@ -952,17 +929,6 @@ class DVGeometryESP(DVGeoSketch):
                 self.JT[ptSetName] = (J_temp.T * new_dPtdCoef.T).tocsr()
                 self.JT[ptSetName].sort_indices()
 
-            # Add in child portion
-            for iChild in range(len(self.children)):
-
-                # Reset control points on child for child link derivatives
-                self.applyToChild(iChild)
-                self.children[iChild].computeTotalJacobian(ptSetName, config=config)
-
-                if self.JT[ptSetName] is not None:
-                    self.JT[ptSetName] = self.JT[ptSetName] + self.children[iChild].JT[ptSetName]
-                else:
-                    self.JT[ptSetName] = self.children[iChild].JT[ptSetName]
         else:
             self.JT[ptSetName] = None
 
@@ -1092,6 +1058,18 @@ class DVGeometryESP(DVGeoSketch):
             # Now get jacobian from child and add to parent jacobian
             child.computeTotalJacobianFD(ptSetName, config=config)
             self.JT[ptSetName] = self.JT[ptSetName] + child.JT[ptSetName]
+
+    def zeroJacobians(self, ptSetNames):
+        """
+        set stored jacobians to None for ptSetNames
+
+        Parameters
+        ----------
+        ptSetNames : list
+            list of ptSetNames to zero the jacobians.
+        """
+        for name in ptSetNames:
+            self.JT[name] = None  # J is no longer up to date
 
     def addVariable(
         self, desmptr_name, name=None, value=None, lower=None, upper=None, scale=1.0, rows=None, cols=None, dh=0.001
