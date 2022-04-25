@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import numpy as np
+from scipy import sparse
 from collections import OrderedDict
 from mpi4py import MPI
 from pyOCSM import ocsm
@@ -845,6 +846,253 @@ class DVGeometryESP(DVGeoSketch):
 
         return dPt
 
+    def computeDVJacobian(self, config=None):
+        """
+        return J_temp for a given config
+        """
+        # These routines are not recursive. They compute the derivatives at this level and
+        # pass information down one level for the next pass call from the routine above
+
+        # This is going to be DENSE in general
+        J_attach = self._attachedPtJacobian(config=config)
+
+        # Compute local normal jacobian
+        J_spanwiselocal = self._spanwiselocalDVJacobian(config=config)
+
+        # Compute local normal jacobian
+        J_sectionlocal = self._sectionlocalDVJacobian(config=config)
+
+        # This is the sparse jacobian for the local DVs that affect
+        # Control points directly.
+        J_local = self._localDVJacobian(config=config)
+
+        # this is the jacobian from accumulated derivative dependence from parent to child
+        J_casc = self._cascadedDVJacobian(config=config)
+
+        J_temp = None
+
+        # add them together
+        if J_attach is not None:
+            J_temp = sparse.lil_matrix(J_attach)
+
+        if J_spanwiselocal is not None:
+            if J_temp is None:
+                J_temp = sparse.lil_matrix(J_spanwiselocal)
+            else:
+                J_temp += J_spanwiselocal
+
+        if J_sectionlocal is not None:
+            if J_temp is None:
+                J_temp = sparse.lil_matrix(J_sectionlocal)
+            else:
+                J_temp += J_sectionlocal
+
+        if J_local is not None:
+            if J_temp is None:
+                J_temp = sparse.lil_matrix(J_local)
+            else:
+                J_temp += J_local
+
+        if J_casc is not None:
+            if J_temp is None:
+                J_temp = sparse.lil_matrix(J_casc)
+            else:
+                J_temp += J_casc
+
+        return J_temp
+
+    def computeTotalJacobian(self, ptSetName, config=None):
+        """
+        Return the total point jacobian in CSR format since we need this for TACS
+        """
+
+        # Finalize the object, if not done yet
+        self._finalize()  # TODO is this necessary for ESP? what does it even do
+        self.curPtSet = ptSetName
+
+        if self.JT[ptSetName] is not None:
+            return
+
+        # compute the derivatives of the coefficients of this level wrt all of the design
+        # variables at this level and all levels above
+        J_temp = self.computeDVJacobian(config=config)
+
+        # now get the derivative of the points for this level wrt the coefficients(dPtdCoef)
+        if self.FFD.embeddedVolumes[ptSetName].dPtdCoef is not None:
+            dPtdCoef = self.FFD.embeddedVolumes[ptSetName].dPtdCoef.tocoo()
+            # We have a slight problem...dPtdCoef only has the shape
+            # functions, so it size Npt x Coef. We need a matrix of
+            # size 3*Npt x 3*nCoef, where each non-zero entry of
+            # dPtdCoef is replaced by value * 3x3 Identity matrix.
+
+            # Extract IJV Triplet from dPtdCoef
+            row = dPtdCoef.row
+            col = dPtdCoef.col
+            data = dPtdCoef.data
+
+            new_row = np.zeros(3 * len(row), "int")
+            new_col = np.zeros(3 * len(row), "int")
+            new_data = np.zeros(3 * len(row))
+
+            # Loop over each entry and expand:
+            for j in range(3):
+                new_data[j::3] = data
+                new_row[j::3] = row * 3 + j
+                new_col[j::3] = col * 3 + j
+
+            # Size of New Matrix:
+            Nrow = dPtdCoef.shape[0] * 3
+            Ncol = dPtdCoef.shape[1] * 3
+
+            # Create new matrix in coo-dinate format and convert to csr
+            new_dPtdCoef = sparse.coo_matrix((new_data, (new_row, new_col)), shape=(Nrow, Ncol)).tocsr()
+
+            # Do Sparse Mat-Mat multiplication and resort indices
+            if J_temp is not None:
+                self.JT[ptSetName] = (J_temp.T * new_dPtdCoef.T).tocsr()
+                self.JT[ptSetName].sort_indices()
+
+            # Add in child portion
+            for iChild in range(len(self.children)):
+
+                # Reset control points on child for child link derivatives
+                self.applyToChild(iChild)
+                self.children[iChild].computeTotalJacobian(ptSetName, config=config)
+
+                if self.JT[ptSetName] is not None:
+                    self.JT[ptSetName] = self.JT[ptSetName] + self.children[iChild].JT[ptSetName]
+                else:
+                    self.JT[ptSetName] = self.children[iChild].JT[ptSetName]
+        else:
+            self.JT[ptSetName] = None
+
+    def computeTotalJacobianFD(self, ptSetName, config=None):
+        """
+        This function takes the total derivative of an objective,
+        I, with respect the points controlled on this processor using FD.
+        We take the transpose products and mpi_allreduce them to get the
+        resulting value on each processor. Note that this function is slow
+        and should eventually be replaced by an analytic version.
+        """
+
+        self._finalize()
+        self.curPtSet = ptSetName
+
+        if self.JT[ptSetName] is not None:
+            return
+
+        if self.isChild:
+            refFFDCoef = copy.copy(self.FFD.coef)
+            refCoef = copy.copy(self.coef)
+
+        # Here we set childDelta as False, but it really doesn't matter
+        # whether it is True or False because we take a difference
+        # between coordsph and coords0, so the Xstart would be cancelled
+        # out in the end.
+        coords0 = self.update(ptSetName, childDelta=False, config=config).flatten()
+
+        if self.nPts[ptSetName] is None:
+            self.nPts[ptSetName] = len(coords0.flatten())
+        for child in self.children:
+            child.nPts[ptSetName] = self.nPts[ptSetName]
+
+        DVGlobalCount, DVLocalCount, DVSecLocCount, DVSpanLocCount = self._getDVOffsets()
+
+        h = 1e-6
+
+        self.JT[ptSetName] = np.zeros([self.nDV_T, self.nPts[ptSetName]])
+
+        for key in self.DV_listGlobal:
+            for j in range(self.DV_listGlobal[key].nVal):
+                if self.isChild:
+                    self.FFD.coef = refFFDCoef.copy()
+                    self.coef = refCoef.copy()
+                    self.refAxis.coef = refCoef.copy()
+                    self.refAxis._updateCurveCoef()
+
+                refVal = self.DV_listGlobal[key].value[j]
+
+                self.DV_listGlobal[key].value[j] += h
+
+                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
+
+                deriv = (coordsph - coords0) / h
+                self.JT[ptSetName][DVGlobalCount, :] = deriv
+
+                DVGlobalCount += 1
+                self.DV_listGlobal[key].value[j] = refVal
+
+        for key in self.DV_listSpanwiseLocal:
+            for j in range(self.DV_listSpanwiseLocal[key].nVal):
+                if self.isChild:
+                    self.FFD.coef = refFFDCoef.copy()
+                    self.coef = refCoef.copy()
+                    self.refAxis.coef = refCoef.copy()
+                    self.refAxis._updateCurveCoef()
+
+                refVal = self.DV_listSpanwiseLocal[key].value[j]
+
+                self.DV_listSpanwiseLocal[key].value[j] += h
+                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
+
+                deriv = (coordsph - coords0) / h
+                self.JT[ptSetName][DVSpanLocCount, :] = deriv
+
+                DVSpanLocCount += 1
+                self.DV_listSpanwiseLocal[key].value[j] = refVal
+
+        for key in self.DV_listSectionLocal:
+            for j in range(self.DV_listSectionLocal[key].nVal):
+                if self.isChild:
+                    self.FFD.coef = refFFDCoef.copy()
+                    self.coef = refCoef.copy()
+                    self.refAxis.coef = refCoef.copy()
+                    self.refAxis._updateCurveCoef()
+
+                refVal = self.DV_listSectionLocal[key].value[j]
+
+                self.DV_listSectionLocal[key].value[j] += h
+                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
+
+                deriv = (coordsph - coords0) / h
+                self.JT[ptSetName][DVSecLocCount, :] = deriv
+
+                DVSecLocCount += 1
+                self.DV_listSectionLocal[key].value[j] = refVal
+
+        for key in self.DV_listLocal:
+            for j in range(self.DV_listLocal[key].nVal):
+                if self.isChild:
+                    self.FFD.coef = refFFDCoef.copy()
+                    self.coef = refCoef.copy()
+                    self.refAxis.coef = refCoef.copy()
+                    self.refAxis._updateCurveCoef()
+
+                refVal = self.DV_listLocal[key].value[j]
+
+                self.DV_listLocal[key].value[j] += h
+                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
+
+                deriv = (coordsph - coords0) / h
+                self.JT[ptSetName][DVLocalCount, :] = deriv
+
+                DVLocalCount += 1
+                self.DV_listLocal[key].value[j] = refVal
+
+        for iChild in range(len(self.children)):
+            child = self.children[iChild]
+            child._finalize()
+
+            # In the updates applied previously, the FFD points on the children
+            # will have been set as deltas. We need to set them as absolute
+            # coordinates based on the changes in the parent before moving down
+            # to the next level
+            self.applyToChild(iChild)
+
+            # Now get jacobian from child and add to parent jacobian
+            child.computeTotalJacobianFD(ptSetName, config=config)
+            self.JT[ptSetName] = self.JT[ptSetName] + child.JT[ptSetName]
+
     def addVariable(
         self, desmptr_name, name=None, value=None, lower=None, upper=None, scale=1.0, rows=None, cols=None, dh=0.001
     ):
@@ -1426,6 +1674,11 @@ class DVGeometryESP(DVGeoSketch):
         # set the update flags
         for ptSet in self.pointSets:
             self.updatedJac[ptSet] = True
+
+    # TODO see if this is needef for TACS Jacobian calculation
+    def _finalize(self):
+        if self.finalized:
+            return
 
 
 class ESPParameter:
