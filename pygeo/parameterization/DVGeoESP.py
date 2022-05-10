@@ -932,6 +932,36 @@ class DVGeometryESP(DVGeoSketch):
         else:
             self.JT[ptSetName] = None
 
+    def computeTotalJacobianCS(self, ptSetName, config=None):
+        """Return the total point jacobian in CSR format since we
+        need this for TACS"""
+
+        self._finalize()
+        self.curPtSet = ptSetName
+
+        if self.JT[ptSetName] is not None:
+            return
+
+        if self.nPts[ptSetName] is None:
+            self.nPts[ptSetName] = len(self.update(ptSetName).flatten())
+
+        DVCount = self._getDVOffsets()
+
+        self.JT[ptSetName] = np.zeros([self.nDV_T, self.nPts[ptSetName]])
+        for key in self.DV_list:
+            for j in range(self.DV_list[key].nVal):
+
+                refVal = self.DV_list[key].value[j]
+
+                self.DV_list[key].value[j] += h
+
+                deriv = np.imag(self._update_deriv_cs(ptSetName, config=config).flatten()) / np.imag(h)
+
+                self.JT[ptSetName][DVCount, :] = deriv
+
+                DVCount += 1
+                self.DV_list[key].value[j] = refVal
+
     def computeTotalJacobianFD(self, ptSetName, config=None):
         """
         This function takes the total derivative of an objective,
