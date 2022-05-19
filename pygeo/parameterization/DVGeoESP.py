@@ -9,7 +9,7 @@ from scipy import sparse
 from collections import OrderedDict
 from mpi4py import MPI
 from pyOCSM import ocsm
-from contextlib import contextmanager
+from contextlib import contextmanagerFT
 from baseclasses.utils import Error
 from .DVGeoSketch import DVGeoSketch
 from .designVars import espDV
@@ -708,7 +708,7 @@ class DVGeometryESP(DVGeoSketch):
         len(self.DVs) : int
             number of design variables
         """
-        return len(self.globalDVList)
+        return len(self.globalDVList)  # TODO align this with VSP, this is silly
 
     def totalSensitivity(self, dIdpt, ptSetName, comm=None, config=None):
         r"""
@@ -741,12 +741,12 @@ class DVGeometryESP(DVGeoSketch):
         if self.pointSets[ptSetName].jac is None:
             # in this case, we updated our pts when we added our pointset,
             # therefore the reference pts are up to date.
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # if the jacobian for this pointset is not up to date
         # update all the points
         if not self.updatedJac[ptSetName]:
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # Make dIdpt at least 3D
         if len(dIdpt.shape) == 2:
@@ -823,12 +823,12 @@ class DVGeometryESP(DVGeoSketch):
         if self.pointSets[ptSetName].jac is None:
             # in this case, we updated our pts when we added our pointset,
             # therefore the reference pts are up to date.
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # if the jacobian for this pointset is not up to date
         # update all the points
         if not self.updatedJac[ptSetName]:
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # vector that has all the derivative seeds of the design vars
         newvec = np.zeros(self.getNDV())
@@ -849,6 +849,123 @@ class DVGeometryESP(DVGeoSketch):
             dPt = dPtlocal
 
         return dPt
+
+    def addVariable(
+        self, desmptr_name, name=None, value=None, lower=None, upper=None, scale=1.0, rows=None, cols=None, dh=0.001
+    ):
+        """
+        Add an ESP design parameter to the DVGeo problem definition.
+        The name of the parameter must match a despmtr in the .csm file
+        of the CAD model.
+
+        Array-valued desmptrs can be handled in one of four ways:
+        - rows=None, cols=None (default): treats the entire array as a flat vector
+        - rows=[1, 2, 3], cols=None: pick specific rows (all cols included)
+        - rows=[1, 2, 3], cols=[2, 4]: pick specific rows and columns
+        - rows=[1], cols=[2]: pick a specific value
+        THE INDICES ARE 1-indexing (per the OpenCSM standard)!! Not 0-indexing.
+
+        The design variable vector passed to pyOptSparse will be in row-major order:
+        in other words, the vector will look like:
+        [a(1, 1), a(1, 2), a(1, 3), a(2, 1), a(2, 2), a(2, 3), a(3, 1), ....]
+
+        The value, upper, and lower bounds must all be of length len(rows)*len(cols)
+
+        Parameters
+        ----------
+        desmptr_name : str
+            Name of the ESP design parameter
+        name : str or None
+            Human-readable name for this design variable (default same as despmtr)
+        value : float or None
+            The design variable. If this value is not supplied (None), then
+            the current value in the ESP model will be queried and used
+        lower : float or None
+            Lower bound for the design variable. Use None for no lower bound
+        upper : float or None
+            Upper bound for the design variable. Use None for no upper bound
+        scale : float
+            Scale factor sent to pyOptSparse and used in optimization
+        rows : list or None
+            Design variable row index(indices) to use.
+            Default None uses all rows
+        cols : list or None
+            Design variable col index(indices) to use.
+            Default None uses all cols
+        dh : float
+            Finite difference step size (default 0.001)
+        """
+        # if name is none, use the desptmr name instead
+        if name is not None:
+            dvName = name
+        else:
+            dvName = desmptr_name
+
+        if dvName in self.DVs.keys():
+            raise Error("Design variable name " + dvName + " already in use.")
+
+        # find the design parm index in ESP
+        if desmptr_name not in self.csmDesPmtrs.keys():
+            raise Error(
+                'User specified design parameter name "' + desmptr_name + '" which was not found in the CSM file'
+            )
+
+        csmDesPmtr = self.csmDesPmtrs[desmptr_name]
+        numRow = csmDesPmtr.numRow
+        numCol = csmDesPmtr.numCol
+        self._validateRowCol(rows, cols, numRow, numCol, dvName)
+
+        if rows is None:
+            rows = range(1, numRow + 1)
+        if cols is None:
+            cols = range(1, numCol + 1)
+        # if value is None, get the current value from ESP
+        if value is None:
+            value = self._csmToFlat(csmDesPmtr.baseValue, rows, cols, numRow, numCol)
+        else:
+            # validate that it is of correct length
+            if len(value) != len(rows) * len(cols):
+                raise Error(
+                    "User-specified DV value does not match the dimensionality"
+                    + "of the ESP despmtr. Value is of length "
+                    + str(len(value))
+                    + " but should be "
+                    + str(len(rows) * len(cols))
+                )
+
+        # check that upper and lower are correct length
+
+        if upper is not None:
+            if isinstance(upper, (float, int)):
+                upper = np.ones((len(rows) * len(cols),)) * upper
+            if len(upper) != len(rows) * len(cols):
+                raise Error(
+                    "User-specified DV upper bound does not match the dimensionality"
+                    + "of the ESP despmtr. Upper is of length "
+                    + str(len(upper))
+                    + " but should be "
+                    + str(len(rows) * len(cols))
+                )
+
+        if lower is not None:
+            if isinstance(lower, (float, int)):
+                lower = np.ones((len(rows) * len(cols),)) * lower
+            if len(lower) != len(rows) * len(cols):
+                raise Error(
+                    "User-specified DV lower bound does not match the dimensionality"
+                    + "of the ESP despmtr. lower is of length "
+                    + str(len(lower))
+                    + " but should be "
+                    + str(len(rows) * len(cols))
+                )
+        nVal = len(rows) * len(cols)
+
+        # add an entry in the global DV list to make finite differencing load balancing easy
+        globalStartInd = len(self.globalDVList)
+        for localInd in range(nVal):
+            self.globalDVList.append((dvName, localInd))
+
+        self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
 
     def computeDVJacobian(self):
         """
@@ -884,8 +1001,9 @@ class DVGeometryESP(DVGeoSketch):
         """
 
         # Finalize the object, if not done yet
-        self._finalize()  # TODO is this necessary for ESP? what does it even do
-        self.curPtSet = ptSetName
+        # self._finalize()  # TODO is this necessary for ESP? what does it even do
+        # don't think so, it's related to axis stuff
+        # self.curPtSet = ptSetName     # this also seems related
 
         if self.JT[ptSetName] is not None:
             return
@@ -1101,122 +1219,44 @@ class DVGeometryESP(DVGeoSketch):
         for name in ptSetNames:
             self.JT[name] = None  # J is no longer up to date
 
-    def addVariable(
-        self, desmptr_name, name=None, value=None, lower=None, upper=None, scale=1.0, rows=None, cols=None, dh=0.001
-    ):
+    def convertSensitivityToDict(self, dIdx, out1D=False, useCompositeNames=False):
         """
-        Add an ESP design parameter to the DVGeo problem definition.
-        The name of the parameter must match a despmtr in the .csm file
-        of the CAD model.
-
-        Array-valued desmptrs can be handled in one of four ways:
-        - rows=None, cols=None (default): treats the entire array as a flat vector
-        - rows=[1, 2, 3], cols=None: pick specific rows (all cols included)
-        - rows=[1, 2, 3], cols=[2, 4]: pick specific rows and columns
-        - rows=[1], cols=[2]: pick a specific value
-        THE INDICES ARE 1-indexing (per the OpenCSM standard)!! Not 0-indexing.
-
-        The design variable vector passed to pyOptSparse will be in row-major order:
-        in other words, the vector will look like:
-        [a(1, 1), a(1, 2), a(1, 3), a(2, 1), a(2, 2), a(2, 3), a(3, 1), ....]
-
-        The value, upper, and lower bounds must all be of length len(rows)*len(cols)
+        This function takes the result of totalSensitivity and
+        converts it to a dict for use in pyOptSparse
 
         Parameters
         ----------
-        desmptr_name : str
-            Name of the ESP design parameter
-        name : str or None
-            Human-readable name for this design variable (default same as despmtr)
-        value : float or None
-            The design variable. If this value is not supplied (None), then
-            the current value in the ESP model will be queried and used
-        lower : float or None
-            Lower bound for the design variable. Use None for no lower bound
-        upper : float or None
-            Upper bound for the design variable. Use None for no upper bound
-        scale : float
-            Scale factor sent to pyOptSparse and used in optimization
-        rows : list or None
-            Design variable row index(indices) to use.
-            Default None uses all rows
-        cols : list or None
-            Design variable col index(indices) to use.
-            Default None uses all cols
-        dh : float
-            Finite difference step size (default 0.001)
+        dIdx : array
+           Flattened array of length getNDV(). Generally it comes from
+           a call to totalSensitivity()
+
+        out1D : boolean
+            If true, creates a 1D array in the dictionary instead of 2D.
+            This function is used in the matrix-vector product calculation.
+
+        useCompositeNames : boolean
+            Composite DVs are not used by DVGeoESP
+
+        Returns
+        -------
+        dIdxDict : dictionary
+           Dictionary of the same information keyed by this object's design variables
         """
-        # if name is none, use the desptmr name instead
-        if name is not None:
-            dvName = name
-        else:
-            dvName = desmptr_name
+        # get total DVs
+        DVCount = self.getNDV()
 
-        if dvName in self.DVs.keys():
-            raise Error("Design variable name " + dvName + " already in use.")
+        # we only have one type of DV
+        i = DVCount
+        dIdxDict = {}
+        for key in self.DVs:
+            dv = self.DVs[key]
+            if out1D:
+                dIdxDict[dv.name] = np.ravel(dIdx[:, i : i + dv.nVal])
+            else:
+                dIdxDict[dv.name] = dIdx[:, i : i + dv.nVal]
+            i += dv.nVal
 
-        # find the design parm index in ESP
-        if desmptr_name not in self.csmDesPmtrs.keys():
-            raise Error(
-                'User specified design parameter name "' + desmptr_name + '" which was not found in the CSM file'
-            )
-
-        csmDesPmtr = self.csmDesPmtrs[desmptr_name]
-        numRow = csmDesPmtr.numRow
-        numCol = csmDesPmtr.numCol
-        self._validateRowCol(rows, cols, numRow, numCol, dvName)
-
-        if rows is None:
-            rows = range(1, numRow + 1)
-        if cols is None:
-            cols = range(1, numCol + 1)
-        # if value is None, get the current value from ESP
-        if value is None:
-            value = self._csmToFlat(csmDesPmtr.baseValue, rows, cols, numRow, numCol)
-        else:
-            # validate that it is of correct length
-            if len(value) != len(rows) * len(cols):
-                raise Error(
-                    "User-specified DV value does not match the dimensionality"
-                    + "of the ESP despmtr. Value is of length "
-                    + str(len(value))
-                    + " but should be "
-                    + str(len(rows) * len(cols))
-                )
-
-        # check that upper and lower are correct length
-
-        if upper is not None:
-            if isinstance(upper, (float, int)):
-                upper = np.ones((len(rows) * len(cols),)) * upper
-            if len(upper) != len(rows) * len(cols):
-                raise Error(
-                    "User-specified DV upper bound does not match the dimensionality"
-                    + "of the ESP despmtr. Upper is of length "
-                    + str(len(upper))
-                    + " but should be "
-                    + str(len(rows) * len(cols))
-                )
-
-        if lower is not None:
-            if isinstance(lower, (float, int)):
-                lower = np.ones((len(rows) * len(cols),)) * lower
-            if len(lower) != len(rows) * len(cols):
-                raise Error(
-                    "User-specified DV lower bound does not match the dimensionality"
-                    + "of the ESP despmtr. lower is of length "
-                    + str(len(lower))
-                    + " but should be "
-                    + str(len(rows) * len(cols))
-                )
-        nVal = len(rows) * len(cols)
-
-        # add an entry in the global DV list to make finite differencing load balancing easy
-        globalStartInd = len(self.globalDVList)
-        for localInd in range(nVal):
-            self.globalDVList.append((dvName, localInd))
-
-        self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
+        return dIdxDict
 
     def printDesignVariables(self):
         """
@@ -1461,7 +1501,7 @@ class DVGeometryESP(DVGeoSketch):
 
         return ug, vg, tg, faceIDg, bodyIDg, edgeIDg, uvlimitsg, tlimitsg, sizes
 
-    def _computeSurfJacobian(self, fd=True):
+    def _computeSurfJacobian(self, pointSets, fd=True):
         """
         This routine comptues the jacobian of the ESP surface with respect
         to the design variables. Since our point sets are rigidly linked to
@@ -1497,9 +1537,11 @@ class DVGeometryESP(DVGeoSketch):
         tlimitsl = np.zeros((0, 2))
         any_ptset_nondistributed = False
         any_ptset_distributed = False
-        for ptSetName in self.pointSets:
+
+        for ptSetName in pointSets:
             # initialize the Jacobians
             self.pointSets[ptSetName].jac = np.zeros((3 * self.pointSets[ptSetName].nPts, nDV))
+
             if self.pointSets[ptSetName].distributed:
                 any_ptset_distributed = True
             else:
@@ -1515,6 +1557,7 @@ class DVGeometryESP(DVGeoSketch):
             edgeIDl = np.concatenate((edgeIDl, self.pointSets[ptSetName].edgeID))
             uvlimitsl = np.concatenate((uvlimitsl, self.pointSets[ptSetName].uvlimits0))
             tlimitsl = np.concatenate((tlimitsl, self.pointSets[ptSetName].tlimits0))
+
         if any_ptset_distributed and any_ptset_nondistributed:
             raise ValueError(
                 "Both nondistributed and distributed pointsets were added to this DVGeoESP which is not yet supported"
@@ -1682,11 +1725,6 @@ class DVGeometryESP(DVGeoSketch):
         # set the update flags
         for ptSet in self.pointSets:
             self.updatedJac[ptSet] = True
-
-    # TODO see if this is needef for TACS Jacobian calculation
-    def _finalize(self):
-        if self.finalized:
-            return
 
 
 class ESPParameter:
