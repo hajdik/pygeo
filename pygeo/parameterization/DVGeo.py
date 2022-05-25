@@ -2147,8 +2147,6 @@ class DVGeometry(BaseDVGeometry):
         else:
             xsdot = self.JT[ptSetName].T.dot(newvec)
             xsdot.reshape(len(xsdot) // 3, 3)
-            # Maybe this should be:
-            # xsdot = xsdot.reshape(len(xsdot)//3, 3)
 
         return xsdot
 
@@ -2319,7 +2317,7 @@ class DVGeometry(BaseDVGeometry):
             Nrow = dPtdCoef.shape[0] * 3
             Ncol = dPtdCoef.shape[1] * 3
 
-            # Create new matrix in coo-dinate format and convert to csr
+            # Create new matrix in COOrdinate format and convert to csr
             new_dPtdCoef = sparse.coo_matrix((new_data, (new_row, new_col)), shape=(Nrow, Ncol)).tocsr()
 
             # Do Sparse Mat-Mat multiplication and resort indices

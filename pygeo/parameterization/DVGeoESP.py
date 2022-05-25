@@ -9,13 +9,13 @@ from scipy import sparse
 from collections import OrderedDict
 from mpi4py import MPI
 from pyOCSM import ocsm
-from contextlib import contextmanagerFT
+import contextlib
 from baseclasses.utils import Error
 from .DVGeoSketch import DVGeoSketch
 from .designVars import espDV
 
 
-@contextmanager
+@contextlib.contextmanager  # changed to work with python 3.9.13
 def stdout_redirected(flag, to=os.devnull):
     """
     import os
@@ -115,6 +115,7 @@ class DVGeometryESP(DVGeoSketch):
         exclude_edge_projections=False,
         ulimits=None,
         vlimits=None,
+        isComplex=False,
     ):
         if comm.rank == 0:
             print("Initializing DVGeometryESP")
@@ -264,7 +265,14 @@ class DVGeometryESP(DVGeoSketch):
 
         # save this name so that we can zero out the jacobians properly
         self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
+
+        self.ptSetNames.append(ptName)
+        self.zeroJacobians([ptName])
+        self.nPts[ptName] = None
+        self.zeroJacobians([ptName])
+
         points = np.array(points).real.astype("d")
+        self.points[ptName] = points
 
         # check that duplicated pointsets are actually the same length
         sizes = np.array(self.comm.allgather(points.shape[0]), dtype="intc")
@@ -549,8 +557,8 @@ class DVGeometryESP(DVGeoSketch):
         if self.comm.rank == 0 or self.comm is None:
             print("Adding pointset", ptName, "took", t2 - t1, "seconds.")
             print("Maximum distance between the added points and the ESP geometry is", dMax_global)
-        if dMax_global > self.projTol:
-            raise ValueError("Pointset projection error exceeded tolerance")
+        # if dMax_global > self.projTol:
+        #     raise ValueError("Pointset projection error exceeded tolerance")
         # Create the little class with the data
         self.pointSets[ptName] = PointSet(
             points, proj_pts, bodyIDArray, faceIDArray, edgeIDArray, uv, t, uvlimArray, tlimArray, distributed
@@ -627,6 +635,8 @@ class DVGeometryESP(DVGeoSketch):
         # provided we are asked for it
         if updateJacobian:
             self._computeSurfJacobian()
+
+        self.zeroJacobians(self.ptSetNames)
 
         # Flag all the pointSets as not being up to date:
         for pointSet in self.updated:
@@ -737,6 +747,7 @@ class DVGeometryESP(DVGeoSketch):
             pyOptSparse
         """
 
+        # TODO I'm pretty sure _computeSurfJacobian gets called in either case, so why not just do it
         # We may not have set the variables so the surf jac might not be computed.
         if self.pointSets[ptSetName].jac is None:
             # in this case, we updated our pts when we added our pointset,
@@ -753,6 +764,9 @@ class DVGeometryESP(DVGeoSketch):
             dIdpt = np.array([dIdpt])
         N = dIdpt.shape[0]
         nPt = dIdpt.shape[1]
+
+        # generate the total Jacobian self.JT
+        self.computeTotalJacobian(ptSetName, config=config)
 
         # The following code computes the final sensitivity product:
         #
@@ -787,13 +801,13 @@ class DVGeometryESP(DVGeoSketch):
         else:
             dIdx = dIdx_local
 
-        # Now convert to dict:
+        # Now convert to dict:  # TODO this could just be convertSensitivityToDict()
         dIdxDict = {}
         for dvName in self.DVs:
             dv = self.DVs[dvName]
             jac_start = dv.globalStartInd
             jac_end = jac_start + dv.nVal
-            # dIdxDict[dvName] = np.array([dIdx[:, i]]).T
+            # dIdxDict[dvName] = np.array([dIdx[:, i]]).T # TODO see if this is needed
             dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
 
         return dIdxDict
@@ -811,24 +825,26 @@ class DVGeometryESP(DVGeoSketch):
         ptSetName : str
             The name of set of points we are dealing with
         comm : MPI.IntraComm
-            The communicator to use to reduce the final derivative. If
-            comm is None, no reduction takes place.
+            The communicator to use to reduce the final derivative. If comm is None, no reduction takes place.
+        config is not used and only here to align the function definition with the regular DVGeo
 
         Returns
         -------
         xsdot : array (Nx3) -> Array with derivative seeds of the surface nodes.
         """
 
+        # TODO I'm pretty sure _computeSurfJacobian gets called in either case, so why not just do it
         # We may not have set the variables so the surf jac might not be computed.
         if self.pointSets[ptSetName].jac is None:
             # in this case, we updated our pts when we added our pointset,
             # therefore the reference pts are up to date.
             self._computeSurfJacobian(ptSetName)
 
-        # if the jacobian for this pointset is not up to date
-        # update all the points
+        # if the jacobian for this pointset is not up to date update all the points
         if not self.updatedJac[ptSetName]:
             self._computeSurfJacobian(ptSetName)
+
+        self.computeTotalJacobian(ptSetName, config=config)  # This updates self.JT
 
         # vector that has all the derivative seeds of the design vars
         newvec = np.zeros(self.getNDV())
@@ -844,11 +860,11 @@ class DVGeometryESP(DVGeoSketch):
         dPtlocal = self.pointSets[ptSetName].jac.dot(newvec)
 
         if comm:
-            dPt = comm.allreduce(dPtlocal, op=MPI.SUM)
+            xsdot = comm.allreduce(dPtlocal, op=MPI.SUM)
         else:
-            dPt = dPtlocal
+            xsdot = dPtlocal
 
-        return dPt
+        return xsdot
 
     def addVariable(
         self, desmptr_name, name=None, value=None, lower=None, upper=None, scale=1.0, rows=None, cols=None, dh=0.001
@@ -967,245 +983,13 @@ class DVGeometryESP(DVGeoSketch):
 
         self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
 
-    def computeDVJacobian(self):
-        """
-        return J_temp for a given config
-        """
-        # These routines are not recursive. They compute the derivatives at this level and
-        # pass information down one level for the next pass call from the routine above
-
-        # This is going to be DENSE in general
-        J_attach = self._attachedPtJacobian()
-
-        # This is the sparse jacobian for the local DVs that affect
-        # Control points directly.
-        J_local = self._localDVJacobian()
-
-        J_temp = None
-
-        # add them together
-        if J_attach is not None:
-            J_temp = sparse.lil_matrix(J_attach)
-
-        if J_local is not None:
-            if J_temp is None:
-                J_temp = sparse.lil_matrix(J_local)
-            else:
-                J_temp += J_local
-
-        return J_temp
-
-    def computeTotalJacobian(self, ptSetName):
-        """
-        Return the total point jacobian in CSR format since we need this for TACS
-        """
-
-        # Finalize the object, if not done yet
-        # self._finalize()  # TODO is this necessary for ESP? what does it even do
-        # don't think so, it's related to axis stuff
-        # self.curPtSet = ptSetName     # this also seems related
-
+    def computeTotalJacobian(self, ptSetName, config=None):
         if self.JT[ptSetName] is not None:
             return
 
-        # compute the derivatives of the coefficients of this level wrt all of the design
-        # variables at this level and all levels above
-        J_temp = self.computeDVJacobian()
-
-        # now get the derivative of the points for this level wrt the coefficients(dPtdCoef)
-        if self.FFD.embeddedVolumes[ptSetName].dPtdCoef is not None:
-            dPtdCoef = self.FFD.embeddedVolumes[ptSetName].dPtdCoef.tocoo()
-            # We have a slight problem...dPtdCoef only has the shape
-            # functions, so it size Npt x Coef. We need a matrix of
-            # size 3*Npt x 3*nCoef, where each non-zero entry of
-            # dPtdCoef is replaced by value * 3x3 Identity matrix.
-
-            # Extract IJV Triplet from dPtdCoef
-            row = dPtdCoef.row
-            col = dPtdCoef.col
-            data = dPtdCoef.data
-
-            new_row = np.zeros(3 * len(row), "int")
-            new_col = np.zeros(3 * len(row), "int")
-            new_data = np.zeros(3 * len(row))
-
-            # Loop over each entry and expand:
-            for j in range(3):
-                new_data[j::3] = data
-                new_row[j::3] = row * 3 + j
-                new_col[j::3] = col * 3 + j
-
-            # Size of New Matrix:
-            Nrow = dPtdCoef.shape[0] * 3
-            Ncol = dPtdCoef.shape[1] * 3
-
-            # Create new matrix in coordinate format and convert to csr
-            new_dPtdCoef = sparse.coo_matrix((new_data, (new_row, new_col)), shape=(Nrow, Ncol)).tocsr()
-
-            # Do Sparse Mat-Mat multiplication and resort indices
-            if J_temp is not None:
-                self.JT[ptSetName] = (J_temp.T * new_dPtdCoef.T).tocsr()
-                self.JT[ptSetName].sort_indices()
-
-        else:
-            self.JT[ptSetName] = None
-
-    def computeTotalJacobianCS(self, ptSetName, config=None):
-        """Return the total point jacobian in CSR format since we
-        need this for TACS"""
-
-        self._finalize()
-        self.curPtSet = ptSetName
-
-        if self.JT[ptSetName] is not None:
-            return
-
-        if self.nPts[ptSetName] is None:
-            self.nPts[ptSetName] = len(self.update(ptSetName).flatten())
-
-        DVCount = self._getDVOffsets()
-
-        self.JT[ptSetName] = np.zeros([self.nDV_T, self.nPts[ptSetName]])
-        for key in self.DV_list:
-            for j in range(self.DV_list[key].nVal):
-
-                refVal = self.DV_list[key].value[j]
-
-                self.DV_list[key].value[j] += h
-
-                deriv = np.imag(self._update_deriv_cs(ptSetName, config=config).flatten()) / np.imag(h)
-
-                self.JT[ptSetName][DVCount, :] = deriv
-
-                DVCount += 1
-                self.DV_list[key].value[j] = refVal
-
-    def computeTotalJacobianFD(self, ptSetName, config=None):
-        """
-        This function takes the total derivative of an objective,
-        I, with respect the points controlled on this processor using FD.
-        We take the transpose products and mpi_allreduce them to get the
-        resulting value on each processor. Note that this function is slow
-        and should eventually be replaced by an analytic version.
-        """
-
-        self._finalize()
-        self.curPtSet = ptSetName
-
-        if self.JT[ptSetName] is not None:
-            return
-
-        if self.isChild:
-            refFFDCoef = copy.copy(self.FFD.coef)
-            refCoef = copy.copy(self.coef)
-
-        # Here we set childDelta as False, but it really doesn't matter
-        # whether it is True or False because we take a difference
-        # between coordsph and coords0, so the Xstart would be cancelled
-        # out in the end.
-        coords0 = self.update(ptSetName, childDelta=False, config=config).flatten()
-
-        if self.nPts[ptSetName] is None:
-            self.nPts[ptSetName] = len(coords0.flatten())
-        for child in self.children:
-            child.nPts[ptSetName] = self.nPts[ptSetName]
-
-        DVGlobalCount, DVLocalCount, DVSecLocCount, DVSpanLocCount = self._getDVOffsets()
-
-        h = 1e-6
-
-        self.JT[ptSetName] = np.zeros([self.nDV_T, self.nPts[ptSetName]])
-
-        for key in self.DV_listGlobal:
-            for j in range(self.DV_listGlobal[key].nVal):
-                if self.isChild:
-                    self.FFD.coef = refFFDCoef.copy()
-                    self.coef = refCoef.copy()
-                    self.refAxis.coef = refCoef.copy()
-                    self.refAxis._updateCurveCoef()
-
-                refVal = self.DV_listGlobal[key].value[j]
-
-                self.DV_listGlobal[key].value[j] += h
-
-                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
-
-                deriv = (coordsph - coords0) / h
-                self.JT[ptSetName][DVGlobalCount, :] = deriv
-
-                DVGlobalCount += 1
-                self.DV_listGlobal[key].value[j] = refVal
-
-        for key in self.DV_listSpanwiseLocal:
-            for j in range(self.DV_listSpanwiseLocal[key].nVal):
-                if self.isChild:
-                    self.FFD.coef = refFFDCoef.copy()
-                    self.coef = refCoef.copy()
-                    self.refAxis.coef = refCoef.copy()
-                    self.refAxis._updateCurveCoef()
-
-                refVal = self.DV_listSpanwiseLocal[key].value[j]
-
-                self.DV_listSpanwiseLocal[key].value[j] += h
-                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
-
-                deriv = (coordsph - coords0) / h
-                self.JT[ptSetName][DVSpanLocCount, :] = deriv
-
-                DVSpanLocCount += 1
-                self.DV_listSpanwiseLocal[key].value[j] = refVal
-
-        for key in self.DV_listSectionLocal:
-            for j in range(self.DV_listSectionLocal[key].nVal):
-                if self.isChild:
-                    self.FFD.coef = refFFDCoef.copy()
-                    self.coef = refCoef.copy()
-                    self.refAxis.coef = refCoef.copy()
-                    self.refAxis._updateCurveCoef()
-
-                refVal = self.DV_listSectionLocal[key].value[j]
-
-                self.DV_listSectionLocal[key].value[j] += h
-                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
-
-                deriv = (coordsph - coords0) / h
-                self.JT[ptSetName][DVSecLocCount, :] = deriv
-
-                DVSecLocCount += 1
-                self.DV_listSectionLocal[key].value[j] = refVal
-
-        for key in self.DV_listLocal:
-            for j in range(self.DV_listLocal[key].nVal):
-                if self.isChild:
-                    self.FFD.coef = refFFDCoef.copy()
-                    self.coef = refCoef.copy()
-                    self.refAxis.coef = refCoef.copy()
-                    self.refAxis._updateCurveCoef()
-
-                refVal = self.DV_listLocal[key].value[j]
-
-                self.DV_listLocal[key].value[j] += h
-                coordsph = self.update(ptSetName, childDelta=False, config=config).flatten()
-
-                deriv = (coordsph - coords0) / h
-                self.JT[ptSetName][DVLocalCount, :] = deriv
-
-                DVLocalCount += 1
-                self.DV_listLocal[key].value[j] = refVal
-
-        for iChild in range(len(self.children)):
-            child = self.children[iChild]
-            child._finalize()
-
-            # In the updates applied previously, the FFD points on the children
-            # will have been set as deltas. We need to set them as absolute
-            # coordinates based on the changes in the parent before moving down
-            # to the next level
-            self.applyToChild(iChild)
-
-            # Now get jacobian from child and add to parent jacobian
-            child.computeTotalJacobianFD(ptSetName, config=config)
-            self.JT[ptSetName] = self.JT[ptSetName] + child.JT[ptSetName]
+        jac = np.array(self.pointSets[ptSetName].jac, dtype="float64")
+        jac_csr = sparse.coo_matrix(jac).tocsr()
+        self.JT[ptSetName] = jac_csr.T
 
     def zeroJacobians(self, ptSetNames):
         """
@@ -1221,8 +1005,7 @@ class DVGeometryESP(DVGeoSketch):
 
     def convertSensitivityToDict(self, dIdx, out1D=False, useCompositeNames=False):
         """
-        This function takes the result of totalSensitivity and
-        converts it to a dict for use in pyOptSparse
+        This function takes the result of totalSensitivity and converts it to a dict for use in pyOptSparse.
 
         Parameters
         ----------
@@ -1257,6 +1040,54 @@ class DVGeometryESP(DVGeoSketch):
             i += dv.nVal
 
         return dIdxDict
+
+    def convertDictToSensitivity(self, dIdxDict):
+        """
+        This function performs the reverse operation of convertSensitivityToDict(); it transforms the dictionary back into an array.
+        This function is important for the matrix-free interface.
+
+        Parameters
+        ----------
+        dIdxDict : dictionary
+           Dictionary of information keyed by this object's design variables
+
+        Returns
+        -------
+        dIdx : array
+           Flattened array of length getNDV().
+        """
+        DVCount = self.getNDV()  # DVGeoESP only has one type of DV
+        dIdx = np.zeros(DVCount, "d")  # DVGeoESP object will never be complex
+
+        i = DVCount
+        for key in self.globalDVList:  # TODO should this be self.DVs instead
+            dv = self.globalDVList[key]
+            dIdx[i : i + dv.nVal] = dIdxDict[dv.name]
+            i += dv.nVal
+
+        return dIdx
+
+    def getVarNames(self, pyOptSparse=False):
+        """
+        Return a list of the design variable names.
+        This is typically used when specifying a wrt= argument for pyOptSparse.
+
+        Parameters
+        ----------
+        pyOptSparse : bool
+            Flag to specify whether the DVs returned should be those in the optProb or those internal to DVGeo.
+            Only relevant if using composite DVs.
+
+        Examples
+        --------
+        optProb.addCon(.....wrt=DVGeo.getVarNames())
+        """
+        names = []
+        if not pyOptSparse:
+            for i in range(self.getNDV()):
+                names.append(self.globalDVList[i][0])
+
+        return names
 
     def printDesignVariables(self):
         """
@@ -1501,12 +1332,11 @@ class DVGeometryESP(DVGeoSketch):
 
         return ug, vg, tg, faceIDg, bodyIDg, edgeIDg, uvlimitsg, tlimitsg, sizes
 
-    def _computeSurfJacobian(self, pointSets, fd=True):
+    def _computeSurfJacobian(self, fd=True):
         """
-        This routine comptues the jacobian of the ESP surface with respect
-        to the design variables. Since our point sets are rigidly linked to
-        the ESP projection points, this is all we need to calculate. The input
-        pointSets is a list or dictionary of pointSets to calculate the jacobian for.
+        This routine comptues the jacobian of the ESP surface with respect to the design variables.
+        Since our point sets are rigidly linked to the ESP projection points, this is all we need to calculate.
+        The input pointSets is a list or dictionary of pointSets to calculate the jacobian for. # TODO there is no input pointSets
         """
 
         # timing stuff:
@@ -1526,7 +1356,7 @@ class DVGeometryESP(DVGeoSketch):
                 nproc = self.comm.size
         rank = self.comm.rank
 
-        # arrays to collect local pointset info
+        # arrays to collect local (denoted by "l") pointset info
         ul = np.zeros(0)  # local u coordinates
         vl = np.zeros(0)  # local v coordinates
         tl = np.zeros(0)  # local t coordinates
@@ -1538,7 +1368,7 @@ class DVGeometryESP(DVGeoSketch):
         any_ptset_nondistributed = False
         any_ptset_distributed = False
 
-        for ptSetName in pointSets:
+        for ptSetName in self.pointSets:
             # initialize the Jacobians
             self.pointSets[ptSetName].jac = np.zeros((3 * self.pointSets[ptSetName].nPts, nDV))
 
@@ -1586,33 +1416,35 @@ class DVGeometryESP(DVGeoSketch):
             edgeIDg = edgeIDl
             uvlimitsg = uvlimitsl
             tlimitsg = tlimitsl
-        # create a local new point array. We will use this to get the new
-        # coordinates as we perturb DVs. We just need one (instead of nDV times the size)
-        # because we get the new points, calculate the jacobian and save it right after
+
+        # create a local new point array.
+        # We will use this to get the new coordinates as we perturb DVs.
+        # We just need one (instead of nDV times the size) because we get the new points, calculate the jacobian and save it right after
         ptsNewL = np.zeros(len(ul) * 3)
 
         # we now have all the point info on all procs.
         tcomm += time.time() - t1
 
         # We need to evaluate all the points on respective procs for FD computations
-
-        # determine how many DVs this proc will perturb.
-        n = 0
-        for iDV in range(self.getNDV()):
-            # I have to do this one.
-            if iDV % nproc == rank:
-                n += 1
         if fd:
+            # determine how many DVs the current proc will perturb
+            proc_nDV = 0
+            for iDV in range(nDV):
+                # determine if the current proc will perturb the iDVth DV
+                if iDV % nproc == rank:
+                    proc_nDV += 1
+
             # evaluate all the points
             pts0 = self._evaluatePoints(ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg)
+
             # allocate the approriate sized numpy array for the perturbed points
-            ptsNew = np.zeros((n, nptsg, 3))
+            ptsNew = np.zeros((proc_nDV, nptsg, 3))
 
             # perturb the DVs on different procs and compute the new point coordinates.
             i = 0  # Counter on local Jac
 
-            for iDV in range(self.getNDV()):
-                # I have to do this one.
+            for iDV in range(nDV):
+                # determine if the current proc is assigned to perturb this DV
                 if iDV % nproc == rank:
                     # Get the DV object for this variable
                     dvName = self.globalDVList[iDV][0]
@@ -1632,13 +1464,15 @@ class DVGeometryESP(DVGeoSketch):
                     tesp += t12 - t11
 
                     t11 = time.time()
-                    # evaluate the points
 
+                    # evaluate the points
                     ptsNew[i, :, :] = self._evaluatePoints(
                         ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg
                     )
+
                     t12 = time.time()
                     teval += t12 - t11
+
                     # now we can calculate the jac and put it back in ptsNew
                     ptsNew[i, :, :] = (ptsNew[i, :, :] - pts0[:, :]) / dh
 
@@ -1661,7 +1495,7 @@ class DVGeometryESP(DVGeoSketch):
 
         ii = 0
         # loop over the DVs and scatter the perturbed points to original procs
-        for iDV in range(self.getNDV()):
+        for iDV in range(nDV):
             # Get the DV object for this variable
             dvName = self.globalDVList[iDV][0]
             dvLocalIndex = self.globalDVList[iDV][1]
@@ -1677,7 +1511,9 @@ class DVGeometryESP(DVGeoSketch):
                     sendbuf = [ptsNew[ii, :, :].flatten(), sizes * 3, disp * 3, MPI.DOUBLE]
                 else:
                     sendbuf = [np.zeros((0, 3)), sizes * 3, disp * 3, MPI.DOUBLE]
+
                 recvbuf = [ptsNewL, MPI.DOUBLE]
+
                 # scatter the info from the proc that perturbed this DV to all procs
                 self.comm.Scatterv(sendbuf, recvbuf, root=root_proc)
             else:
@@ -1687,6 +1523,7 @@ class DVGeometryESP(DVGeoSketch):
                     ptsNewL[:] = ptsNew[ii, :, :].flatten()
                 else:
                     bcastbuf = [ptsNewL, MPI.DOUBLE]
+
                 # bcast the info from the proc that perturbed this DV to all procs
                 self.comm.Bcast(bcastbuf, root=root_proc)
                 self.comm.Barrier()
@@ -1718,7 +1555,7 @@ class DVGeometryESP(DVGeoSketch):
         t2 = time.time()
         if rank == 0:
             print("FD jacobian calcs with DVGeoESP took", (t2 - t1), "seconds in total")
-            print("updating the esp model took", tesp, "seconds")
+            print("updating the ESP model took", tesp, "seconds")
             print("evaluating the new points took", teval, "seconds")
             print("communication took", tcomm, "seconds")
 
