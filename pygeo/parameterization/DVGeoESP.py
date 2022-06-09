@@ -269,11 +269,10 @@ class DVGeometryESP(DVGeoSketch):
         self.ptSetNames.append(ptName)
         self.zeroJacobians([ptName])
         self.nPts[ptName] = None
-        self.zeroJacobians([ptName])
 
         points = np.array(points).real.astype("d")
         self.points[ptName] = points
-
+        np.savetxt("from_tacs.txt", points)
         # check that duplicated pointsets are actually the same length
         sizes = np.array(self.comm.allgather(points.shape[0]), dtype="intc")
         if not distributed:
@@ -550,7 +549,7 @@ class DVGeometryESP(DVGeoSketch):
             dMax = np.max(np.sqrt(np.sum((points - proj_pts) ** 2, axis=1)))
         else:
             dMax = 0.0
-
+        np.savetxt("proj.txt", proj_pts)
         dMax_global = self.comm.allreduce(dMax, op=MPI.MAX)
         t2 = time.time()
 
@@ -1025,19 +1024,32 @@ class DVGeometryESP(DVGeoSketch):
         dIdxDict : dictionary
            Dictionary of the same information keyed by this object's design variables
         """
-        # get total DVs
-        DVCount = self.getNDV()
+        # # get total DVs
+        # DVCount = self.getNDV()
 
-        # we only have one type of DV
-        i = DVCount
+        # # we only have one type of DV
+        # i = DVCount
+        # dIdxDict = {}
+        # for key in self.DVs:
+        #     dv = self.DVs[key]
+        #     if out1D:
+        #         dIdxDict[dv.name] = np.ravel(dIdx[:, i : i + dv.nVal])
+        #     else:
+        #         dIdxDict[dv.name] = dIdx[:, i : i + dv.nVal]
+        #     i += dv.nVal
+
         dIdxDict = {}
-        for key in self.DVs:
-            dv = self.DVs[key]
-            if out1D:
-                dIdxDict[dv.name] = np.ravel(dIdx[:, i : i + dv.nVal])
-            else:
-                dIdxDict[dv.name] = dIdx[:, i : i + dv.nVal]
-            i += dv.nVal
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
+            jac_start = dv.globalStartInd
+            jac_end = jac_start + dv.nVal
+            dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
+
+        print("")
+        print("")
+        print(dIdxDict)
+        print("")
+        print("")
 
         return dIdxDict
 
@@ -1072,20 +1084,13 @@ class DVGeometryESP(DVGeoSketch):
         Return a list of the design variable names.
         This is typically used when specifying a wrt= argument for pyOptSparse.
 
-        Parameters
-        ----------
-        pyOptSparse : bool
-            Flag to specify whether the DVs returned should be those in the optProb or those internal to DVGeo.
-            Only relevant if using composite DVs.
-
         Examples
         --------
         optProb.addCon(.....wrt=DVGeo.getVarNames())
         """
         names = []
-        if not pyOptSparse:
-            for i in range(self.getNDV()):
-                names.append(self.globalDVList[i][0])
+        for i in range(self.getNDV()):
+            names.append(self.globalDVList[i][0])
 
         return names
 
