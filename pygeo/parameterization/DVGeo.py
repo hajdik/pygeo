@@ -1917,12 +1917,6 @@ class DVGeometry(BaseDVGeometry):
             array = np.hstack(array)
             dIdxDict = {self.DVComposite.name: array}
 
-        print("")
-        print("")
-        print(dIdxDict)
-        print("")
-        print("")
-
         return dIdxDict
 
     def convertDictToSensitivity(self, dIdxDict):

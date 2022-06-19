@@ -472,9 +472,11 @@ class DVGeometryESP(DVGeoSketch):
             uvlimits_best = None
             tlimits_best = None
             t_best = -1
+
             for bodyIndex in self.bodyIndices:
                 nEdges = self.espModel.GetBody(bodyIndex)[6]
                 nFaces = self.espModel.GetBody(bodyIndex)[7]
+
                 if not self.exclude_edge_projections:
                     for edgeIndex in range(1, nEdges + 1):
                         # try to match point on edges first
@@ -483,9 +485,11 @@ class DVGeometryESP(DVGeoSketch):
                             ttemp = self.espModel.GetUV(bodyIndex, ocsm.EDGE, edgeIndex, 1, truexyz.tolist())
                             # get the xyz location of the newly projected point
                             xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, ocsm.EDGE, edgeIndex, 1, ttemp))
+
                         dist_temp = np.sum((truexyz - xyztemp) ** 2)
                         ttemp = ttemp[0]
                         tlimits = self._getUVLimits(bodyIndex, ocsm.EDGE, edgeIndex)
+
                         if not (ttemp < tlimits[0] - rejectuvtol or ttemp > tlimits[1] + rejectuvtol):
                             if dist_temp < dist_best:
                                 tlimits_best = tlimits
@@ -501,11 +505,13 @@ class DVGeometryESP(DVGeoSketch):
                         uvtemp = self.espModel.GetUV(bodyIndex, ocsm.FACE, faceIndex, 1, truexyz.tolist())
                         # get the XYZ location of the newly projected points
                         xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, ocsm.FACE, faceIndex, 1, uvtemp))
+
                     dist_temp = np.sum((truexyz - xyztemp) ** 2)
                     # validate u and v
                     utemp = uvtemp[0]
                     vtemp = uvtemp[1]
                     uvlimits = self._getUVLimits(bodyIndex, ocsm.FACE, faceIndex)
+
                     if not (
                         utemp < uvlimits[0] - rejectuvtol
                         or utemp > uvlimits[1] + rejectuvtol
@@ -529,9 +535,11 @@ class DVGeometryESP(DVGeoSketch):
                                 tlimits_best = None
                                 dist_best = dist_temp
                                 xyzbest = xyztemp.copy()
+
             if dist_best == 99999999999:
                 # all projections failed: this shouldn't occur unless the uv limits are set too tight
                 raise ValueError("All projections failed for this point. Check ulimits and vlimits")
+
             faceIDArray[ptidx] = fi_best
             edgeIDArray[ptidx] = ei_best
             bodyIDArray[ptidx] = bi_best
@@ -548,15 +556,17 @@ class DVGeometryESP(DVGeoSketch):
             dMax = np.max(np.sqrt(np.sum((points - proj_pts) ** 2, axis=1)))
         else:
             dMax = 0.0
-        np.savetxt("proj.txt", proj_pts)
+
         dMax_global = self.comm.allreduce(dMax, op=MPI.MAX)
         t2 = time.time()
 
         if self.comm.rank == 0 or self.comm is None:
             print("Adding pointset", ptName, "took", t2 - t1, "seconds.")
             print("Maximum distance between the added points and the ESP geometry is", dMax_global)
-        # if dMax_global > self.projTol:
-        #     raise ValueError("Pointset projection error exceeded tolerance")
+
+        if dMax_global > self.projTol:
+            raise ValueError("Pointset projection error exceeded tolerance")
+
         # Create the little class with the data
         self.pointSets[ptName] = PointSet(
             points, proj_pts, bodyIDArray, faceIDArray, edgeIDArray, uv, t, uvlimArray, tlimArray, distributed
@@ -584,6 +594,7 @@ class DVGeometryESP(DVGeoSketch):
                 uvlimitsg = uvlimArray
                 tlimitsg = tlimArray
                 sizes = np.array([len(ug)])
+
             if self.comm.rank == 0:
                 np.savez_compressed(
                     cache_projections,
