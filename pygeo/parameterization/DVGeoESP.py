@@ -265,14 +265,13 @@ class DVGeometryESP(DVGeoSketch):
 
         # save this name so that we can zero out the jacobians properly
         self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
-
         self.ptSetNames.append(ptName)
         self.zeroJacobians([ptName])
         self.nPts[ptName] = None
 
         points = np.array(points).real.astype("d")
         self.points[ptName] = points
-        np.savetxt("from_tacs.txt", points)
+
         # check that duplicated pointsets are actually the same length
         sizes = np.array(self.comm.allgather(points.shape[0]), dtype="intc")
         if not distributed:
@@ -774,31 +773,22 @@ class DVGeometryESP(DVGeoSketch):
         #  ------  ------
         #   pXdv    pXpt
         #
-        # Where I is the objective, Xpt are the externally coordinates
-        # supplied in addPointSet
-
-        # Extract just the single dIdpt we are working with. Make
-        # a copy because we may need to modify it.
+        # Where I is the objective, Xpt are the external coordinates supplied in addPointSet
 
         # reshape the dIdpt array from [N] * [nPt] * [3] to  [N] * [nPt*3]
         dIdpt = dIdpt.reshape((N, nPt * 3))
 
-        # # transpose dIdpt and vstack;
-        # # Now vstack the result with seamBar as that is far as the
-        # # forward FD jacobian went.
-        # tmp = np.vstack([dIdpt.T, dIdSeam.T])
-        tmp = dIdpt.T
-
-        # we also stack the pointset jacobian
         jac = self.pointSets[ptSetName].jac.copy()
 
-        dIdxT_local = jac.T.dot(tmp)
+        dIdxT_local = jac.T.dot(dIdpt.T)
         dIdx_local = dIdxT_local.T
 
         if comm:
             dIdx = comm.allreduce(dIdx_local, op=MPI.SUM)
         else:
             dIdx = dIdx_local
+
+        # dIdxDict = self.convertSensitivityToDict(dIdx)
 
         # Now convert to dict:  # TODO this could just be convertSensitivityToDict()
         dIdxDict = {}
@@ -986,9 +976,16 @@ class DVGeometryESP(DVGeoSketch):
         if self.JT[ptSetName] is not None:
             return
 
+        if not self.updatedJac[ptSetName]:
+            self._computeSurfJacobian()
+
         jac = np.array(self.pointSets[ptSetName].jac, dtype="float64")
-        jac_csr = sparse.coo_matrix(jac).tocsr()
-        self.JT[ptSetName] = jac_csr.T
+        jac_T = jac.T
+        jacT_csr = sparse.coo_matrix(jac_T).tocsr()
+
+        self.JT[ptSetName] = jacT_csr
+        self.JT[ptSetName].has_sorted_indices = False
+        self.JT[ptSetName].sort_indices()
 
     def zeroJacobians(self, ptSetNames):
         """
@@ -1000,7 +997,7 @@ class DVGeometryESP(DVGeoSketch):
             list of ptSetNames to zero the jacobians.
         """
         for name in ptSetNames:
-            self.JT[name] = None  # J is no longer up to date
+            self.JT[name] = None  # JT is no longer up to date
 
     def convertSensitivityToDict(self, dIdx, out1D=False, useCompositeNames=False):
         """
@@ -1024,19 +1021,6 @@ class DVGeometryESP(DVGeoSketch):
         dIdxDict : dictionary
            Dictionary of the same information keyed by this object's design variables
         """
-        # # get total DVs
-        # DVCount = self.getNDV()
-
-        # # we only have one type of DV
-        # i = DVCount
-        # dIdxDict = {}
-        # for key in self.DVs:
-        #     dv = self.DVs[key]
-        #     if out1D:
-        #         dIdxDict[dv.name] = np.ravel(dIdx[:, i : i + dv.nVal])
-        #     else:
-        #         dIdxDict[dv.name] = dIdx[:, i : i + dv.nVal]
-        #     i += dv.nVal
 
         dIdxDict = {}
         for dvName in self.DVs:
@@ -1044,12 +1028,6 @@ class DVGeometryESP(DVGeoSketch):
             jac_start = dv.globalStartInd
             jac_end = jac_start + dv.nVal
             dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
-
-        print("")
-        print("")
-        print(dIdxDict)
-        print("")
-        print("")
 
         return dIdxDict
 

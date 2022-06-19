@@ -2019,7 +2019,7 @@ class DVGeometry(BaseDVGeometry):
             This is the total derivative of the objective or function
             of interest with respect to the coordinates in
             'ptSetName'. This can be a single array of size (Npt, 3)
-            **or** a group of N vectors of size (Npt, 3, N). If you
+            **or** a group of N vectors of size (N, Npt, 3). If you
             have many to do, it is faster to do many at once.
 
         ptSetName : str
@@ -2030,7 +2030,7 @@ class DVGeometry(BaseDVGeometry):
             comm is None, no reduction takes place.
 
         config : str or list
-            Define what configurations this design variable will be applied to
+            Define what configurations this design variable will be applied to.
             Use a string for a single configuration or a list for multiple
             configurations. The default value of None implies that the design
             variable applies to *ALL* configurations.
