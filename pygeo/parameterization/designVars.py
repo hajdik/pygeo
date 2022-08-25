@@ -2,7 +2,7 @@
 #         Imports
 # ======================================================================
 import numpy as np
-from pygeo.geo_utils import convertTo1D
+from ..geo_utils import convertTo1D
 
 
 class geoDV:
@@ -325,3 +325,12 @@ class vspDV(geoDV):
         self.group = group
         self.parm = parm
         self.dh = dh
+
+
+class cstDV(geoDV):
+    def __init__(self, name, value, nVal, lower, upper, scale, dvType):
+        """
+        Internal class for storing CST design variable information
+        """
+        super().__init__(name=name, value=value, nVal=nVal, lower=lower, upper=upper, scale=scale)
+        self.type = dvType
