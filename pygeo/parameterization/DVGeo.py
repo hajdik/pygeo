@@ -668,7 +668,7 @@ class DVGeometry(BaseDVGeometry):
             DVGeo object to use as a sub-FFD
         """
 
-        # Make sure the DVGeo being added is flaged as a child:
+        # Make sure the DVGeo being added is flagged as a child:
         if childDVGeo.isChild is False:
             raise Error("Trying to add a child FFD that has NOT been " "created as a child. This operation is illegal.")
 
@@ -2035,11 +2035,6 @@ class DVGeometry(BaseDVGeometry):
         dIdxDict : dic
             The dictionary containing the derivatives, suitable for
             pyOptSparse
-
-        Notes
-        -----
-        The ``child`` and ``nDVStore`` options are only used
-        internally and should not be changed by the user.
         """
 
         # Make dIdpt at least 3D
@@ -2187,11 +2182,6 @@ class DVGeometry(BaseDVGeometry):
         dIdxDict : dic
             The dictionary containing the derivatives, suitable for
             pyOptSparse
-
-        Notes
-        -----
-        The ``child`` and ``nDVStore`` options are only used
-        internally and should not be changed by the user.
         """
 
         self.computeTotalJacobian(ptSetName, config=config)

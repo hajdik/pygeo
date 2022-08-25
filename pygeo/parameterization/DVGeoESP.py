@@ -540,18 +540,27 @@ class DVGeometryESP(DVGeoSketch):
                 # all projections failed: this shouldn't occur unless the uv limits are set too tight
                 raise ValueError("All projections failed for this point. Check ulimits and vlimits")
 
+            # store the face, edge, and body in the ESP model that correspond to this point
             faceIDArray[ptidx] = fi_best
             edgeIDArray[ptidx] = ei_best
             bodyIDArray[ptidx] = bi_best
+
+            # record our u, v, and t limits for this point
             uvlimArray[ptidx, :] = np.array(uvlimits_best)
             tlimArray[ptidx, :] = np.array(tlimits_best)
+
+            # store the parametric (u, v, and t) coordinates for this point
             uv[ptidx, 0] = uv_best[0]
             uv[ptidx, 1] = uv_best[1]
             t[ptidx] = t_best
+
             dists[ptidx] = dist_best
             proj_pts_esp[ptidx, :] = xyzbest
 
+        # scale our projected points by the given model scale
         proj_pts = proj_pts_esp * self.modelScale
+
+        # find the max distance between the pointset and the ESP geometry
         if points.shape[0] != 0:
             dMax = np.max(np.sqrt(np.sum((points - proj_pts) ** 2, axis=1)))
         else:
@@ -575,6 +584,7 @@ class DVGeometryESP(DVGeoSketch):
         # Set the updated flag to false because the jacobian is not up to date.
         self.updated[ptName] = False
         self.updatedJac[ptName] = False
+        # TODO also zero JT here?
 
         if cache_projections and not cache_loaded:
             # get the global projections and save in compressed npz format
@@ -629,7 +639,8 @@ class DVGeometryESP(DVGeoSketch):
         # Just dump in the values
         for key in dvDict:
             if key in self.DVs:
-                self.DVs[key].value = dvDict[key].copy()
+                vals_to_set = np.atleast_1d(dvDict[key]).astype("D")
+                self.DVs[key].value = vals_to_set
 
         # we need to update the design variables in the ESP model and rebuild
         built_successfully = self._updateModel()
@@ -935,10 +946,14 @@ class DVGeometryESP(DVGeoSketch):
             rows = range(1, numRow + 1)
         if cols is None:
             cols = range(1, numCol + 1)
+
         # if value is None, get the current value from ESP
         if value is None:
             value = self._csmToFlat(csmDesPmtr.baseValue, rows, cols, numRow, numCol)
+
         else:
+            value = np.atleast_1d(np.array(value)).astype("D")
+
             # validate that it is of correct length
             if len(value) != len(rows) * len(cols):
                 raise Error(
@@ -950,10 +965,10 @@ class DVGeometryESP(DVGeoSketch):
                 )
 
         # check that upper and lower are correct length
-
         if upper is not None:
             if isinstance(upper, (float, int)):
                 upper = np.ones((len(rows) * len(cols),)) * upper
+
             if len(upper) != len(rows) * len(cols):
                 raise Error(
                     "User-specified DV upper bound does not match the dimensionality"
@@ -966,6 +981,7 @@ class DVGeometryESP(DVGeoSketch):
         if lower is not None:
             if isinstance(lower, (float, int)):
                 lower = np.ones((len(rows) * len(cols),)) * lower
+
             if len(lower) != len(rows) * len(cols):
                 raise Error(
                     "User-specified DV lower bound does not match the dimensionality"
@@ -1088,11 +1104,14 @@ class DVGeometryESP(DVGeoSketch):
         Print a formatted list of design variables to the screen
         """
         print("-" * 85)
-        print("{:>30}{:>20}{:>20}".format("CSM Design Parameter", "Name", "Value"))
+        print("{:>20}{:>20}".format("Name", "Value"))
         print("-" * 85)
         for dvName in self.DVs:
             DV = self.DVs[dvName]
-            print(f"{DV.csmDesPmtr:>30}{DV.name:>20}{DV.value:>20}")
+            print(DV.csmDesPmtr)
+            print(DV.name)
+            print(DV.value)
+            # print(f"{DV.name:>20}{np.real(DV.value):>20}")
 
     # # ----------------------------------------------------------------------
     # #        THE REMAINDER OF THE FUNCTIONS NEED NOT BE CALLED BY THE USER

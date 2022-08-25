@@ -304,7 +304,7 @@ class espDV(geoDV):
         Internal class for storing ESP design variable information
         """
         nVal = len(rows) * len(cols)
-        super().__init__(name=name, value=np.array(value), nVal=nVal, lower=lower, upper=upper, scale=scale)
+        super().__init__(name=name, value=value, nVal=nVal, lower=lower, upper=upper, scale=scale)
 
         self.csmDesPmtr = csmDesPmtr
         self.rows = rows
