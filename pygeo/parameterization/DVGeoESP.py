@@ -834,7 +834,7 @@ class DVGeometryESP(DVGeoSketch):
         ptSetName : str
             The name of set of points we are dealing with.
         comm : MPI.IntraComm
-            The communicator to use to reduce the final derivative. 
+            The communicator to use to reduce the final derivative.
             If comm is None, no reduction takes place.
         config is not used and only here to align the function definition with the regular DVGeo
 
@@ -1368,11 +1368,7 @@ class DVGeometryESP(DVGeoSketch):
         """
         This routine comptues the jacobian of the ESP surface with respect to the design variables.
         Since our point sets are rigidly linked to the ESP projection points, this is all we need to calculate.
-<<<<<<< HEAD
         The input pointSets is a list or dictionary of pointSets to calculate the jacobian for. # TODO there is no input pointSets
-=======
-        The input pointSets is a list or dictionary of pointSets to calculate the jacobian for.
->>>>>>> 7212c824e7e9a5eb2357ebcacc5362e85399aed2
         """
 
         # timing stuff:
@@ -1618,7 +1614,7 @@ class PointSet:
     Internal class for storing information about the pointset and associated projections.
     """
 
-,    def __init__(self, points, proj_pts, bodyID, faceID, edgeID, uv, t, uvlimits, tlimits, distributed):
+    def __init__(self, points, proj_pts, bodyID, faceID, edgeID, uv, t, uvlimits, tlimits, distributed):
         self.points = points
         self.proj_pts = proj_pts
         self.bodyID = bodyID
