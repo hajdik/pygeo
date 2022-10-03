@@ -11,6 +11,7 @@ from mpi4py import MPI
 from pyOCSM import ocsm
 import contextlib
 from baseclasses.utils import Error
+from pyspline.utils import openTecplot, writeTecplot1D, writeTecplot2D, closeTecplot
 from .DVGeoSketch import DVGeoSketch
 from .designVars import espDV
 
@@ -228,7 +229,9 @@ class DVGeometryESP(DVGeoSketch):
             t3 = time.time()
             print("Initialized DVGeometryESP in", (t3 - t0), "seconds.")
 
-    def addPointSet(self, points, ptName, distributed=True, cache_projections=False, **kwargs):
+    def addPointSet(
+        self, points, ptName, distributed=True, cache_projections=False, debug=False, fileName=None, **kwargs
+    ):
         """
         Add a set of coordinates to DVGeometryESP.
         The is the main way that geometry, in the form of a coordinate list, is given to DVGeometry to be manipulated.
@@ -547,6 +550,24 @@ class DVGeometryESP(DVGeoSketch):
         # scale our projected points by the given model scale
         proj_pts = proj_pts_esp * self.modelScale
 
+        debug = False
+        fileName = "tecTest.dat"
+        if debug:
+            dist = np.sqrt((points - proj_pts) ** 2)
+            writeSurface(points, quadsConn, surfName=, nodeData=dist, cellData={}, outDir=".")
+
+            # distX = dist[:, 0]
+            # distY = dist[:, 1]
+            # distZ = dist[:, 2]
+
+            # f = openTecplot(fileName, 1)
+            # writeTecplot2D(f, "distance", np.dstack((points, dist)))
+            # writeTecplot3D(f, "distanceY", distY)
+            # writeTecplot3D(f, "distanceZ", distZ)
+
+        # dist0 = np.sqrt(np.sum((points - proj_pts) ** 2, axis=0))
+        # dist1 = np.sqrt(np.sum((points - proj_pts) ** 2, axis=1))
+
         # find the max distance between the pointset and the ESP geometry
         if points.shape[0] != 0:
             dMax = np.max(np.sqrt(np.sum((points - proj_pts) ** 2, axis=1)))
@@ -622,7 +643,9 @@ class DVGeometryESP(DVGeoSketch):
             The keys of the dictionary must correspond to the design variable names.
             Any additional keys in the dfvdictionary are simply ignored.
         """
-
+        print("--------------------------")
+        print(dvDict)
+        print("--------------------------")
         # Just dump in the values
         for key in dvDict:
             if key in self.DVs:
@@ -699,8 +722,8 @@ class DVGeometryESP(DVGeoSketch):
             # get the offset between points and original projected points
             offset = self.pointSets[ptSetName].offset
 
-            # Get the coordinates of new surface cfd points, use the same array, BUT this should
-            # actually be called newPoints since it has cfd nodes now
+            # Get the coordinates of new surface mesh points, use the same array, BUT this should
+            # actually be called newPoints since it has mesh nodes now
             newPts -= offset
 
             # Now compute the delta between the nominal new points and the
@@ -731,6 +754,107 @@ class DVGeometryESP(DVGeoSketch):
 
         if self.comm.rank == 0:
             self.espModel.Save(fileName)
+
+    def writePointSet(self, name, fileName, solutionTime=None):
+        """
+        Write a given point set to a tecplot file
+
+        Parameters
+        ----------
+        name : str
+             The name of the point set to write to a file
+
+        fileName : str
+           Filename for tecplot file. Should have no extension, an
+           extension will be added
+        SolutionTime : float
+            Solution time to write to the file. This could be a fictitious time to
+            make visualization easier in tecplot.
+        """
+        coords = self.update(name)
+        fileName = fileName + "_%s.dat" % name
+        f = openTecplot(fileName, 3)
+        writeTecplot1D(f, name, coords, solutionTime)
+        closeTecplot(f)
+
+    def writeSurface(coor, quadsConn, surfName, nodeData={}, cellData={}, outDir="."):
+        asbytes = lambda s: s
+        write_mode = "w"
+
+        # Add extension to the file name
+        fileName = outDir + "/" + surfName + ".plt"
+
+        # Open file
+        fileID = open(fileName, write_mode)
+
+        # Add title
+        fileID.write(asbytes('Title = "TSurf Surface FE data" \n'))
+
+        # Add variable names
+        fileID.write(asbytes("Variables = "))
+        var_names = ["X", "Y", "Z"]
+
+        # add nodal data names
+        for k in nodeData:
+            var_names.append(k)
+
+        # # add cell data names
+        # for k in cellData:
+        #     var_names.append(k)
+
+        for name in var_names:
+            fileID.write(asbytes('"' + name + '" '))
+        fileID.write(asbytes("\n"))
+
+        # Gather number of nodes and finite elements
+        nNodes = coor.shape[0]
+        nQuads = quadsConn.shape[0]
+
+        # Write curve data
+        fileID.write(asbytes('Zone T= "' + surfName + '"\n'))
+        fileID.write(asbytes("Nodes=" + str(nNodes) + ", Elements=" + str(nQuads) + ", ZONETYPE=FEQUADRILATERAL\n"))
+
+        # the first 3 data points are coordinates. These will always be nodal
+        nNodal = 3
+        # check if user provided any more nodal data
+        nNodal += len(nodeData)
+
+        fileID.write(asbytes("VARLOCATION=([1-%d]=NODAL" % nNodal))
+
+        # # check if user provided any cell centered data
+
+        # # single user defined cell centered data
+        # if len(cellData) == 1:
+        #     fileID.write(asbytes(", [%d]=CELLCENTERED)\n" % (nNodal + 1)))
+        # # multiple user defined cell centered data
+        # elif len(cellData) > 1:
+        #     fileID.write(asbytes(", [%d-%d]=CELLCENTERED)\n" % (nNodal + 1, nNodal + len(cellData))))
+        # # no cell centered data. End the line
+        # else:
+        #     fileID.write(asbytes(")\n"))
+
+        fileID.write(asbytes("DATAPACKING=BLOCK\n"))
+
+        # Write nodal coordinates
+        for i in range(3):
+            np.savetxt(fileID, coor[:, i])
+
+        # write any nodal data
+        for k, v in nodeData.items():
+            np.savetxt(fileID, v)
+
+        # # write surface data
+        # for k, v in cellData.items():
+        #     np.savetxt(fileID, v)
+
+        # Write quad connectivities
+        np.savetxt(fileID, quadsConn, fmt="%i")
+
+        # Close output file
+        fileID.close()
+
+        # Print log
+        print("Surface " + surfName + " saved to file " + fileName)
 
     def getNDV(self):
         """
@@ -1140,6 +1264,7 @@ class DVGeometryESP(DVGeoSketch):
         uvlimits : list
             ulower, uupper, vlower, vupper or tlower, tupper
         """
+        # print(ibody, seltype, iselect)
         this_ego = self.espModel.GetEgo(ibody, seltype, iselect)
         _, _, _, uvlimits, _, _ = this_ego.getTopology()
 
@@ -1253,15 +1378,22 @@ class DVGeometryESP(DVGeoSketch):
                 espColIdx = dv.cols[colIdx]
                 self.espModel.SetValuD(espParamIdx, irow=espRowIdx, icol=espColIdx, value=dv.value[localIdx])
 
-        # finally, rebuild
-        outtuple = self.espModel.Build(0, 0)
-        # check that the number of branches built successfully matches the number when the model was first built on __init__
-        # otherwise, there was an EGADS/CSM build failure at this design point
-        if outtuple[0] != self.num_branches_baseline:
-            return False
-        else:
-            # built correctly
+        # # finally, rebuild
+        # outtuple = self.espModel.Build(0, 0)
+        # # check that the number of branches built successfully matches the number when the model was first built on __init__
+        # # otherwise, there was an EGADS/CSM build failure at this design point
+        # if outtuple[0] != self.num_branches_baseline:
+        #     return False
+        # else:
+        #     # built correctly
+        #     return True
+
+        try:
+            self.espModel.Build(0, 0)
             return True
+
+        except ocsm.OcsmError:
+            return False
 
     def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts):
         points = np.zeros((nPts, 3))
