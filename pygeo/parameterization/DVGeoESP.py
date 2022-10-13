@@ -252,7 +252,9 @@ class DVGeometryESP(DVGeoSketch):
             If a filename is provided, the cached ``u, v, t`` coordinates will be saved in numpy compressed format ('.npz' extension should be used).
             The points will be validated to ensure that the projections remain within tolerance of the model and if not, the projections will be recreated.
         """
-
+        print("")
+        print("-----------------------------------------------")
+        print(f"adding pointset {ptName}")
         # save this name so that we can zero out the jacobians properly
         self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
         self.ptSetNames.append(ptName)
@@ -550,24 +552,6 @@ class DVGeometryESP(DVGeoSketch):
         # scale our projected points by the given model scale
         proj_pts = proj_pts_esp * self.modelScale
 
-        debug = False
-        fileName = "tecTest.dat"
-        if debug:
-            dist = np.sqrt((points - proj_pts) ** 2)
-            writeSurface(points, quadsConn, surfName=, nodeData=dist, cellData={}, outDir=".")
-
-            # distX = dist[:, 0]
-            # distY = dist[:, 1]
-            # distZ = dist[:, 2]
-
-            # f = openTecplot(fileName, 1)
-            # writeTecplot2D(f, "distance", np.dstack((points, dist)))
-            # writeTecplot3D(f, "distanceY", distY)
-            # writeTecplot3D(f, "distanceZ", distZ)
-
-        # dist0 = np.sqrt(np.sum((points - proj_pts) ** 2, axis=0))
-        # dist1 = np.sqrt(np.sum((points - proj_pts) ** 2, axis=1))
-
         # find the max distance between the pointset and the ESP geometry
         if points.shape[0] != 0:
             dMax = np.max(np.sqrt(np.sum((points - proj_pts) ** 2, axis=1)))
@@ -581,8 +565,9 @@ class DVGeometryESP(DVGeoSketch):
             print("Adding pointset", ptName, "took", t2 - t1, "seconds.")
             print("Maximum distance between the added points and the ESP geometry is", dMax_global)
 
+        self.projTol = 0.5
         if dMax_global > self.projTol:
-            raise ValueError("Pointset projection error exceeded tolerance")
+            raise ValueError(f"Pointset {ptName} projection error {dMax_global} exceeded tolerance {self.projTol}")
 
         # Create the little class with the data
         self.pointSets[ptName] = PointSet(
@@ -644,7 +629,7 @@ class DVGeometryESP(DVGeoSketch):
             Any additional keys in the dfvdictionary are simply ignored.
         """
         print("--------------------------")
-        print(dvDict)
+        print("setting", dvDict)
         print("--------------------------")
         # Just dump in the values
         for key in dvDict:
@@ -714,7 +699,7 @@ class DVGeometryESP(DVGeoSketch):
             Name of pointset to return.
             This must match ones of the given in an :func:`addPointSet()` call.
         """
-
+        print(f"updating pointset {ptSetName}")
         # this returns the current projection point coordinates
         newPts = self.pointSets[ptSetName].proj_pts
 
@@ -755,107 +740,6 @@ class DVGeometryESP(DVGeoSketch):
         if self.comm.rank == 0:
             self.espModel.Save(fileName)
 
-    def writePointSet(self, name, fileName, solutionTime=None):
-        """
-        Write a given point set to a tecplot file
-
-        Parameters
-        ----------
-        name : str
-             The name of the point set to write to a file
-
-        fileName : str
-           Filename for tecplot file. Should have no extension, an
-           extension will be added
-        SolutionTime : float
-            Solution time to write to the file. This could be a fictitious time to
-            make visualization easier in tecplot.
-        """
-        coords = self.update(name)
-        fileName = fileName + "_%s.dat" % name
-        f = openTecplot(fileName, 3)
-        writeTecplot1D(f, name, coords, solutionTime)
-        closeTecplot(f)
-
-    def writeSurface(coor, quadsConn, surfName, nodeData={}, cellData={}, outDir="."):
-        asbytes = lambda s: s
-        write_mode = "w"
-
-        # Add extension to the file name
-        fileName = outDir + "/" + surfName + ".plt"
-
-        # Open file
-        fileID = open(fileName, write_mode)
-
-        # Add title
-        fileID.write(asbytes('Title = "TSurf Surface FE data" \n'))
-
-        # Add variable names
-        fileID.write(asbytes("Variables = "))
-        var_names = ["X", "Y", "Z"]
-
-        # add nodal data names
-        for k in nodeData:
-            var_names.append(k)
-
-        # # add cell data names
-        # for k in cellData:
-        #     var_names.append(k)
-
-        for name in var_names:
-            fileID.write(asbytes('"' + name + '" '))
-        fileID.write(asbytes("\n"))
-
-        # Gather number of nodes and finite elements
-        nNodes = coor.shape[0]
-        nQuads = quadsConn.shape[0]
-
-        # Write curve data
-        fileID.write(asbytes('Zone T= "' + surfName + '"\n'))
-        fileID.write(asbytes("Nodes=" + str(nNodes) + ", Elements=" + str(nQuads) + ", ZONETYPE=FEQUADRILATERAL\n"))
-
-        # the first 3 data points are coordinates. These will always be nodal
-        nNodal = 3
-        # check if user provided any more nodal data
-        nNodal += len(nodeData)
-
-        fileID.write(asbytes("VARLOCATION=([1-%d]=NODAL" % nNodal))
-
-        # # check if user provided any cell centered data
-
-        # # single user defined cell centered data
-        # if len(cellData) == 1:
-        #     fileID.write(asbytes(", [%d]=CELLCENTERED)\n" % (nNodal + 1)))
-        # # multiple user defined cell centered data
-        # elif len(cellData) > 1:
-        #     fileID.write(asbytes(", [%d-%d]=CELLCENTERED)\n" % (nNodal + 1, nNodal + len(cellData))))
-        # # no cell centered data. End the line
-        # else:
-        #     fileID.write(asbytes(")\n"))
-
-        fileID.write(asbytes("DATAPACKING=BLOCK\n"))
-
-        # Write nodal coordinates
-        for i in range(3):
-            np.savetxt(fileID, coor[:, i])
-
-        # write any nodal data
-        for k, v in nodeData.items():
-            np.savetxt(fileID, v)
-
-        # # write surface data
-        # for k, v in cellData.items():
-        #     np.savetxt(fileID, v)
-
-        # Write quad connectivities
-        np.savetxt(fileID, quadsConn, fmt="%i")
-
-        # Close output file
-        fileID.close()
-
-        # Print log
-        print("Surface " + surfName + " saved to file " + fileName)
-
     def getNDV(self):
         """
         Return the number of DVs.
@@ -889,7 +773,7 @@ class DVGeometryESP(DVGeoSketch):
         dIdxDict : dic
             The dictionary containing the derivatives, suitable for pyOptSparse.
         """
-
+        print("get totalSensitivity")
         # TODO I'm pretty sure _computeSurfJacobian gets called in either case, so why not just do it
         # We may not have set the variables so the surf jac might not be computed.
         if self.pointSets[ptSetName].jac is None:
@@ -967,7 +851,7 @@ class DVGeometryESP(DVGeoSketch):
         xsdot : array (Nx3)
             Array with derivative seeds of the surface nodes.
         """
-
+        print("get totalSensitivityProd")
         # TODO I'm pretty sure _computeSurfJacobian gets called in either case, so why not just do it
         # We may not have set the variables so the surf jac might not be computed.
         if self.pointSets[ptSetName].jac is None:
@@ -1051,6 +935,7 @@ class DVGeometryESP(DVGeoSketch):
             Finite difference step size.
             Default 0.001.
         """
+        print(f"add DV {desmptr_name")
         # if name is none, use the desptmr name instead
         if name is not None:
             dvName = name
@@ -1129,6 +1014,7 @@ class DVGeometryESP(DVGeoSketch):
         self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
 
     def computeTotalJacobian(self, ptSetName, config=None):
+        print(f"computing total jacobian for {ptSetName}")
         if self.JT[ptSetName] is not None:
             return
 
@@ -1264,6 +1150,7 @@ class DVGeometryESP(DVGeoSketch):
         uvlimits : list
             ulower, uupper, vlower, vupper or tlower, tupper
         """
+        print(f"get uvLimits on body {ibody}")
         # print(ibody, seltype, iselect)
         this_ego = self.espModel.GetEgo(ibody, seltype, iselect)
         _, _, _, uvlimits, _, _ = this_ego.getTopology()
@@ -1366,6 +1253,7 @@ class DVGeometryESP(DVGeoSketch):
         """
         Sets design parameters in ESP to the correct value then rebuilds the model.
         """
+        print("update model")
         # for each design variable in the dictionary:
         # loop through rows and cols setting design paramter values
         for dvName in self.DVs:
@@ -1396,6 +1284,7 @@ class DVGeometryESP(DVGeoSketch):
             return False
 
     def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts):
+        print("evaluate points")
         points = np.zeros((nPts, 3))
         for ptidx in range(nPts):
             # check if on an edge or surface
@@ -1427,6 +1316,7 @@ class DVGeometryESP(DVGeoSketch):
                 unew = (u[ptidx] - uvlim0[0]) * urange / urange0 + uvlim[0]
                 vnew = (v[ptidx] - uvlim0[2]) * vrange / vrange0 + uvlim[2]
                 points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.FACE, fid, 1, [unew, vnew])
+
         points = points * self.modelScale
         return points
 
