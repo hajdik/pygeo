@@ -114,11 +114,10 @@ class DVGeometryESP(DVGeoSketch):
         vlimits=None,
         isComplex=False,
     ):
-        if comm.rank == 0:
-            print("Initializing DVGeometryESP")
-            t0 = time.time()
-
         super().__init__(fileName=fileName, comm=comm, scale=scale, projTol=projTol)
+        print(f"Initializing DVGeometryESP for {self.fileName}")
+        if comm.rank == 0:
+            t0 = time.time()
 
         self.maxproc = maxproc
         self.esp = True
@@ -162,7 +161,7 @@ class DVGeometryESP(DVGeoSketch):
 
         t2 = time.time()
         if self.comm.rank == 0:
-            print("Loading the esp model took:", (t2 - t1))
+            print(f"Loading the esp model {self.fileName} took:", (t2 - t1))
 
         # List of all bodies returned from ESP
         if not bodies:
@@ -252,9 +251,10 @@ class DVGeometryESP(DVGeoSketch):
             If a filename is provided, the cached ``u, v, t`` coordinates will be saved in numpy compressed format ('.npz' extension should be used).
             The points will be validated to ensure that the projections remain within tolerance of the model and if not, the projections will be recreated.
         """
+        # if self.comm.rank == 0:
         print("")
         print("-----------------------------------------------")
-        print(f"adding pointset {ptName}")
+        print(f"adding pointset {ptName} for filename {self.fileName}")
         # save this name so that we can zero out the jacobians properly
         self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
         self.ptSetNames.append(ptName)
@@ -454,6 +454,7 @@ class DVGeometryESP(DVGeoSketch):
         # and slightly prefer surface projections to edge projections
         rejectuvtol = 1e-4
         edgetol = 1e-8
+        print(f"start projecting {ptName}")
         for ptidx in range(npoints):
             truexyz = points[ptidx]
             bi_best = -1
@@ -548,7 +549,7 @@ class DVGeometryESP(DVGeoSketch):
 
             dists[ptidx] = dist_best
             proj_pts_esp[ptidx, :] = xyzbest
-
+        print(f"end projections {ptName}")
         # scale our projected points by the given model scale
         proj_pts = proj_pts_esp * self.modelScale
 
@@ -560,10 +561,29 @@ class DVGeometryESP(DVGeoSketch):
 
         dMax_global = self.comm.allreduce(dMax, op=MPI.MAX)
         t2 = time.time()
+        # print("start")
+        # sizes = np.array(self.comm.allgather(len(points)), dtype="intc")
+        # disp = np.array([np.sum(sizes[:i]) for i in range(self.comm.size)], dtype="intc")
+        # self.comm.Allgatherv([points, len(points)], [np.zeros(np.sum(sizes)), sizes, disp, MPI.DOUBLE])
+        # self.comm.Allgatherv([proj_pts, len(proj_pts)], [np.zeros(np.sum(sizes)), sizes, disp, MPI.DOUBLE])
+        # print("plot it")
 
         if self.comm.rank == 0 or self.comm is None:
-            print("Adding pointset", ptName, "took", t2 - t1, "seconds.")
-            print("Maximum distance between the added points and the ESP geometry is", dMax_global)
+            print(f"Adding pointset {ptName} took {t2 - t1} seconds.")
+        print(
+            f"Maximum distance between the added points in {ptName} and the ESP geometry {self.fileName} is {dMax_global}"
+        )
+
+        # import matplotlib.pyplot as plt
+
+        # fig = plt.figure()
+        # ax = fig.add_subplot(projection="3d")
+        # ax.scatter(points[:, 0], points[:, 1], points[:, 2], marker="o", color="b")
+        # ax.scatter(proj_pts[:, 0], proj_pts[:, 1], proj_pts[:, 2], marker="v", color="g")
+
+        # ax.set_box_aspect((1, 1, 1))
+        # plt.title(ptName)
+        # plt.show()
 
         self.projTol = 0.5
         if dMax_global > self.projTol:
@@ -628,9 +648,6 @@ class DVGeometryESP(DVGeoSketch):
             The keys of the dictionary must correspond to the design variable names.
             Any additional keys in the dfvdictionary are simply ignored.
         """
-        print("--------------------------")
-        print("setting", dvDict)
-        print("--------------------------")
         # Just dump in the values
         for key in dvDict:
             if key in self.DVs:
@@ -699,7 +716,6 @@ class DVGeometryESP(DVGeoSketch):
             Name of pointset to return.
             This must match ones of the given in an :func:`addPointSet()` call.
         """
-        print(f"updating pointset {ptSetName}")
         # this returns the current projection point coordinates
         newPts = self.pointSets[ptSetName].proj_pts
 
@@ -773,7 +789,6 @@ class DVGeometryESP(DVGeoSketch):
         dIdxDict : dic
             The dictionary containing the derivatives, suitable for pyOptSparse.
         """
-        print("get totalSensitivity")
         # TODO I'm pretty sure _computeSurfJacobian gets called in either case, so why not just do it
         # We may not have set the variables so the surf jac might not be computed.
         if self.pointSets[ptSetName].jac is None:
@@ -851,7 +866,6 @@ class DVGeometryESP(DVGeoSketch):
         xsdot : array (Nx3)
             Array with derivative seeds of the surface nodes.
         """
-        print("get totalSensitivityProd")
         # TODO I'm pretty sure _computeSurfJacobian gets called in either case, so why not just do it
         # We may not have set the variables so the surf jac might not be computed.
         if self.pointSets[ptSetName].jac is None:
@@ -935,7 +949,6 @@ class DVGeometryESP(DVGeoSketch):
             Finite difference step size.
             Default 0.001.
         """
-        print(f"add DV {desmptr_name")
         # if name is none, use the desptmr name instead
         if name is not None:
             dvName = name
@@ -1014,7 +1027,6 @@ class DVGeometryESP(DVGeoSketch):
         self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
 
     def computeTotalJacobian(self, ptSetName, config=None):
-        print(f"computing total jacobian for {ptSetName}")
         if self.JT[ptSetName] is not None:
             return
 
@@ -1040,6 +1052,26 @@ class DVGeometryESP(DVGeoSketch):
         """
         for name in ptSetNames:
             self.JT[name] = None  # JT is no longer up to date
+
+    def getValues(self):
+        """
+        Generic routine to return the current set of design
+        variables. Values are returned in a dictionary format
+        that would be suitable for a subsequent call to :func:`setDesignVars`
+
+        Returns
+        -------
+        dvDict : dict
+            Dictionary of design variables
+        """
+
+        dvDict = {}
+
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
+            dvDict[dvName] = dv.value
+
+        return dvDict
 
     def convertSensitivityToDict(self, dIdx, out1D=False, useCompositeNames=False):
         """
@@ -1091,9 +1123,9 @@ class DVGeometryESP(DVGeoSketch):
         DVCount = self.getNDV()  # DVGeoESP only has one type of DV
         dIdx = np.zeros(DVCount, "d")  # DVGeoESP object will never be complex
 
-        i = DVCount
-        for key in self.globalDVList:  # TODO should this be self.DVs instead
-            dv = self.globalDVList[key]
+        i = 0
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
             dIdx[i : i + dv.nVal] = dIdxDict[dv.name]
             i += dv.nVal
 
@@ -1150,7 +1182,7 @@ class DVGeometryESP(DVGeoSketch):
         uvlimits : list
             ulower, uupper, vlower, vupper or tlower, tupper
         """
-        print(f"get uvLimits on body {ibody}")
+        # print(f"get uvLimits on body {ibody}")
         # print(ibody, seltype, iselect)
         this_ego = self.espModel.GetEgo(ibody, seltype, iselect)
         _, _, _, uvlimits, _, _ = this_ego.getTopology()
@@ -1253,7 +1285,6 @@ class DVGeometryESP(DVGeoSketch):
         """
         Sets design parameters in ESP to the correct value then rebuilds the model.
         """
-        print("update model")
         # for each design variable in the dictionary:
         # loop through rows and cols setting design paramter values
         for dvName in self.DVs:
@@ -1284,7 +1315,6 @@ class DVGeometryESP(DVGeoSketch):
             return False
 
     def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts):
-        print("evaluate points")
         points = np.zeros((nPts, 3))
         for ptidx in range(nPts):
             # check if on an edge or surface
@@ -1608,10 +1638,10 @@ class DVGeometryESP(DVGeoSketch):
 
         t2 = time.time()
         if rank == 0:
-            print("FD jacobian calcs with DVGeoESP took", (t2 - t1), "seconds in total")
-            print("updating the ESP model took", tesp, "seconds")
-            print("evaluating the new points took", teval, "seconds")
-            print("communication took", tcomm, "seconds")
+            print(f"FD jacobian calcs with DVGeoESP took {t2 - t1} seconds in total for {self.fileName}")
+            print(f"updating the ESP model took {tesp} seconds")
+            print(f"evaluating the new points took {teval} seconds")
+            print(f"communication took {tcomm} seconds")
 
         # set the update flags
         for ptSet in self.pointSets:
