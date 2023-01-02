@@ -1160,6 +1160,25 @@ class DVGeometryESP(DVGeoSketch):
             print(DV.value)
             # print(f"{DV.name:>20}{np.real(DV.value):>20}")
 
+    def writePointSet(self, name, fileName):
+        """
+        Write a given point set to a tecplot file
+
+        Parameters
+        ----------
+        name : str
+             The name of the point set to write to a file
+
+        fileName : str
+           Filename for tecplot file. Should have no extension, an
+           extension will be added
+        """
+        coords = self.update(name)
+        fileName = fileName + "_%s.dat" % name
+        f = openTecplot(fileName, 3)
+        writeTecplot1D(f, name, coords)
+        closeTecplot(f)
+
     # # ----------------------------------------------------------------------
     # #        THE REMAINDER OF THE FUNCTIONS NEED NOT BE CALLED BY THE USER
     # # ----------------------------------------------------------------------
