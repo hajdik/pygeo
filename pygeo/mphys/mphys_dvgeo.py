@@ -149,8 +149,8 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         else:
             self.add_output(name, distributed=True, shape=(0,))
 
-    def nom_addThicknessConstraints1D(self, name, ptList, nCon, axis):
-        self.DVCon.addThicknessConstraints1D(ptList, nCon, axis, name=name)
+    def nom_addThicknessConstraints1D(self, name, ptList, nCon, axis, scaled=True):
+        self.DVCon.addThicknessConstraints1D(ptList, nCon, axis, name=name, scaled=scaled)
         comm = self.comm
         if comm.rank == 0:
             self.add_output(name, distributed=True, val=np.ones(nCon), shape=nCon)
@@ -207,15 +207,15 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
     def nom_addTriangulatedSurfaceConstraint(
         self,
         name,
-        surface_1_name,
-        DVGeo_1_name,
-        surface_2_name,
-        DVGeo_2_name,
-        rho,
-        heuristic_dist,
-        perim_scale,
-        max_perim,
-        scale,
+        surface_1_name=None,
+        DVGeo_1_name="default",
+        surface_2_name="default",
+        DVGeo_2_name="default",
+        rho=50.0,
+        heuristic_dist=None,
+        perim_scale=0.1,
+        max_perim=3.0,
+        addToPyOpt=True,
     ):
         self.DVCon.addTriangulatedSurfaceConstraint(
             surface_1_name=surface_1_name,
@@ -227,15 +227,16 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
             perim_scale=perim_scale,
             max_perim=max_perim,
             name=name,
-            scale=scale,
+            addToPyOpt=addToPyOpt,
         )
 
         comm = self.comm
         if comm.rank == 0:
-            # add our output: KS, perim_length, and failFlag
-            self.add_output(name, distributed=True, val=np.zeros(3), shape=2)
+            self.add_output(f"{name}_KS", distributed=True, val=0, shape=1)
+            self.add_output(f"{name}_perim", distributed=True, val=0, shape=1)
         else:
-            self.add_output(name, distributed=True, shape=0)
+            self.add_output(f"{name}_KS", distributed=True, shape=0)
+            self.add_output(f"{name}_perim", distributed=True, shape=0)
 
     def nom_addRefAxis(self, childIdx=None, **kwargs):
         # we just pass this through
