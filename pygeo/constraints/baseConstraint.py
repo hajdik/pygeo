@@ -1,10 +1,10 @@
-# Standard Python modules
+# ======================================================================
+#         Imports
+# ======================================================================
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-
-# External modules
-from baseclasses.utils import Error
 import numpy as np
+from baseclasses.utils import Error
 
 
 class GeometricConstraint(ABC):
@@ -86,6 +86,15 @@ class GeometricConstraint(ABC):
             optProb.addConGroup(
                 self.name, self.nCon, lower=self.lower, upper=self.upper, scale=self.scale, wrt=wrt_names
             )
+
+    def addVariablesPyOpt(self, optProb):
+        """
+        Add the variables to pyOpt, if the flag is set
+        """
+        # if self.addToPyOpt:
+        #     optProb.addVarGroup(self.name, self.nCon, lower=self.lower,
+        #                         upper=self.upper, scale=self.scale,
+        #                         wrt=self.getVarNames())
 
     @abstractmethod
     def writeTecplot(self, handle):

@@ -1,13 +1,8 @@
-# Standard Python modules
 import os
 import unittest
-
-# External modules
+import numpy as np
 from baseclasses import BaseRegTest
 import commonUtils
-import numpy as np
-
-# First party modules
 from pygeo import DVGeometry, geo_utils
 
 

@@ -1,4 +1,3 @@
-# External modules
 import numpy as np
 
 
@@ -168,11 +167,11 @@ def createFittedWingFFD(surf, surfFormat, outFile, leList, teList, nSpan, nChord
     ----------
     surf : pyGeo object or list or str
         The surface around which the FFD will be created.
-        See the documentation for :meth:`pygeo.constraints.DVCon.DVConstraints.setSurface` for details.
+        See the documentation for :meth:`pygeo.DVConstraints.setSurface` for details.
 
     surfFormat : str
         The surface format.
-        See the documentation for :meth:`pygeo.constraints.DVCon.DVConstraints.setSurface` for details.
+        See the documentation for :meth:`pygeo.DVConstraints.setSurface` for details.
 
     outFile : str
         Name of output file written in PLOT3D format.
@@ -222,7 +221,6 @@ def createFittedWingFFD(surf, surfFormat, outFile, leList, teList, nSpan, nChord
     """
 
     # Import inside this function to avoid circular imports
-    # First party modules
     from pygeo import DVConstraints
 
     # Set the triangulated surface in DVCon

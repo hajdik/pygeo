@@ -1,9 +1,6 @@
-# Standard Python modules
+import unittest
 import os
 import subprocess
-import unittest
-
-# External modules
 from parameterized import parameterized
 
 baseDir = os.path.dirname(os.path.abspath(__file__))

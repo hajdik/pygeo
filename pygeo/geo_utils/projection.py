@@ -1,11 +1,6 @@
-# Standard Python modules
-import sys
-
-# External modules
 import numpy as np
+import sys
 from pyspline.utils import line_plane
-
-# Local modules
 from .remove_duplicates import pointReduce
 
 # --------------------------------------------------------------

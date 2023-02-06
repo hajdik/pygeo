@@ -1,12 +1,7 @@
-# Standard Python modules
 import unittest
-
-# External modules
 import numpy as np
-from test_Blocks import add_vars
-
-# First party modules
 from pygeo import DVGeometry, geo_utils
+from test_Blocks import add_vars
 
 
 class RegTestPyGeo(unittest.TestCase):

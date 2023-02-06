@@ -1,31 +1,29 @@
-# Standard Python modules
-from collections import OrderedDict
-
-# External modules
-from baseclasses.utils import Error
+# ======================================================================
+#         Imports
+# ======================================================================
 import numpy as np
-from pyspline import Curve
-
-# Local modules
 from .. import geo_utils, pyGeo
-from ..geo_utils.file_io import readPlot3DSurfFile
-from ..geo_utils.misc import convertTo2D
-from .areaConstraint import ProjectedAreaConstraint, SurfaceAreaConstraint, TriangulatedSurfaceConstraint
-from .baseConstraint import GlobalLinearConstraint, LinearConstraint
-from .circularityConstraint import CircularityConstraint
-from .colinearityConstraint import ColinearityConstraint
-from .curvatureConstraint import CurvatureConstraint, CurvatureConstraint1D
-from .gearPostConstraint import GearPostConstraint
-from .locationConstraint import LocationConstraint
-from .planarityConstraint import PlanarityConstraint
-from .radiusConstraint import RadiusConstraint
+from pyspline import Curve
+from collections import OrderedDict
+from baseclasses.utils import Error
+from .baseConstraint import LinearConstraint, GlobalLinearConstraint
 from .thicknessConstraint import ThicknessConstraint, ThicknessToChordConstraint
-from .volumeConstraint import CompositeVolumeConstraint, TriangulatedVolumeConstraint, VolumeConstraint
+from .radiusConstraint import RadiusConstraint
+from .locationConstraint import LocationConstraint
+from .areaConstraint import TriangulatedSurfaceConstraint, SurfaceAreaConstraint, ProjectedAreaConstraint
+from .volumeConstraint import VolumeConstraint, TriangulatedVolumeConstraint, CompositeVolumeConstraint
+from .colinearityConstraint import ColinearityConstraint
+from .gearPostConstraint import GearPostConstraint
+from .circularityConstraint import CircularityConstraint
+from .planarityConstraint import PlanarityConstraint
+from .curvatureConstraint import CurvatureConstraint, CurvatureConstraint1D
+from ..geo_utils.misc import convertTo2D
+from ..geo_utils.file_io import readPlot3DSurfFile
 
 
 class DVConstraints:
     """DVConstraints provides a convenient way of defining geometric
-    constraints for wings. This can be very useful for a constrained
+    constraints for WINGS. This can be very useful for a constrained
     aerodynamic or aerostructural optimization. Three types of
     constraints are supported:
 
@@ -403,7 +401,6 @@ class DVConstraints:
             Name of the DVGeo object to obtain the surface from (default is 'None')
         """
         try:
-            # External modules
             from stl import mesh
         except ImportError as e:
             raise ImportError("numpy-stl package must be installed") from e
@@ -471,7 +468,7 @@ class DVConstraints:
         * The leading and trailing edges are approximated using
           2-order splines (line segments) and nSpan points are
           interpolated in a linear fashion. For integer nSpan, the thickness
-          constraint may not correspond *exactly* to intermediate
+          constraint may not correspond **EXACTLY** to intermediate
           locations in leList and teList. In the example above,
           with len(leList)=3 and nSpan=3, the three thickness
           constraints on the leading edge of the 2D domain would be at
@@ -492,7 +489,7 @@ class DVConstraints:
           are always exactly normal to this plane.
 
         * If the surface formed by leList and teList is NOT precisely
-          normal, issues can arise near the end of an open surface (ie
+          normal, issues can arise near the end of an opensurface (ie
           root of a single wing) which can result in failing
           intersections.
 
@@ -560,7 +557,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         surfaceName : str
@@ -709,7 +706,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         surfaceName : str
@@ -872,7 +869,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         surfaceName : str
@@ -1029,7 +1026,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         DVGeoName : str
@@ -1155,7 +1152,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         DVGeoName : str
@@ -1274,7 +1271,7 @@ class DVConstraints:
             apply the same bounds to all constraints, while the array
             option will use different bounds for each constraint. This
             constraint can only be used in "scaled" mode. That means,
-            the actual t/c is *never* computed. This constraint can
+            the *actual* t/c is *NEVER* computed. This constraint can
             only be used to constrain the relative change in t/c. A
             lower bound of 1.0, therefore mean the t/c cannot
             decrease. This is the typical use of this constraint.
@@ -1302,7 +1299,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         DVGeoName : str
@@ -2242,7 +2239,7 @@ class DVConstraints:
 
         addToPyOpt : bool
             Normally this should be left at the default of True. If
-            the values need to be processed (modified) *before* they are
+            the values need to be processed (modified) BEFORE they are
             given to the optimizer, set this flag to False.
 
         compNames : list
@@ -2958,8 +2955,7 @@ class DVConstraints:
         """
         Add a curvature contraint along the prescribed straightline on the design surface.
         This can be used to impose a spanwise curvature constraint for wing aerodynamic optimization.
-
-        .. note:: the output is the square of the curvature to make sure the values are always positive
+        NOTE: the output is the square of the curvature to make sure the values are always positive
 
         See below for a schematic.
 
@@ -2982,11 +2978,8 @@ class DVConstraints:
           is defined, we generate nPts-2 intermediate points along it and project these points to the design
           surface mesh in the prescirbed axis direction. Here 'x' are the intermediate points added by setting
           nPts = 9. The curvature will be calculated based on the projected intermediate points (x) on the design
-          surface.
-
-        .. note::
-           We do not calculate the curvatures at the two end points (+).
-           So make sure to extend the start and end points a bit to fully cover the area where you want to compute the curvature
+          surface. NOTE: we do not calculate the curvatures at the two end points (+). So make sure to extend
+          the start and end points a bit to fully cover the area where you want to compute the curvature
 
         Parameters
         ----------
@@ -3001,8 +2994,7 @@ class DVConstraints:
         axis : list of size 3
             The direction along which the projections will occur.
             Typically this will be y or z axis ([0,1,0] or [0,0,1])
-
-            .. note:: we also compute the curvature based on this axis dir
+            NOTE: we also compute the curvature based on this axis dir
 
         curvatureType : str
             What type of curvature constraint to compute. Either mean or aggregated
@@ -3074,8 +3066,8 @@ class DVConstraints:
 
         Examples
         --------
-        >>> # define a 2 point poly-line along the wing spanwise direction (z)
-        >>> # and project to the design surface along y
+        # define a 2 point poly-line along the wing spanwise direction (z)
+        # and project to the design surface along y
         >>> start = [0, 0, 0]
         >>> end = [0, 0, 1]
         >>> nPts = 10

@@ -1,26 +1,17 @@
-# Standard Python modules
-from collections import OrderedDict
-from contextlib import contextmanager
+# ======================================================================
+#         Imports
+# ======================================================================
 import os
 import sys
 import time
-
-# External modules
-from baseclasses.utils import Error
-from mpi4py import MPI
 import numpy as np
-
-# Local modules
+from collections import OrderedDict
+from mpi4py import MPI
+from pyOCSM import ocsm
+from contextlib import contextmanager
+from baseclasses.utils import Error
 from .DVGeoSketch import DVGeoSketch
 from .designVars import espDV
-
-try:
-    # External modules
-    from pyOCSM import ocsm
-
-    ocsmImported = True
-except ImportError:
-    ocsmImported = False
 
 
 @contextmanager
@@ -99,10 +90,11 @@ class DVGeometryESP(DVGeoSketch):
     --------
     The general sequence of operations for using DVGeometry is as follows:
 
-      >>> from pygeo import DVGeometryESP
+      >>> from pygeo import *
       >>> DVGeo = DVGeometryESP("wing.csm", MPI_COMM_WORLD)
       >>> # Add a set of coordinates Xpt into the object
       >>> DVGeo.addPointSet(Xpt, 'myPoints')
+      >>>
     """
 
     def __init__(
@@ -119,8 +111,6 @@ class DVGeometryESP(DVGeoSketch):
         ulimits=None,
         vlimits=None,
     ):
-        if not ocsmImported:
-            raise ImportError("OCSM and pyOCSM must be installed to use DVGeometryESP.")
         if comm.rank == 0:
             print("Initializing DVGeometryESP")
             t0 = time.time()
@@ -132,7 +122,6 @@ class DVGeometryESP(DVGeoSketch):
 
         # will become a list of tuples with (DVName, localIndex) - used for finite difference load balancing
         self.globalDVList = []
-        self.useComposite = False
 
         self.suppress_stdout = suppress_stdout
         self.exclude_edge_projections = exclude_edge_projections
@@ -256,7 +245,6 @@ class DVGeometryESP(DVGeoSketch):
         """
 
         # save this name so that we can zero out the jacobians properly
-        self.ptSetNames.append(ptName)
         self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
         points = np.array(points).real.astype("d")
 
@@ -602,13 +590,11 @@ class DVGeometryESP(DVGeoSketch):
             The keys of the dictionary must correspond to the design variable names.
             Any additional keys in the dfvdictionary are simply ignored.
         """
-        if self.useComposite:
-            dvDict = self.mapXDictToDVGeo(dvDict)
 
         # Just dump in the values
         for key in dvDict:
             if key in self.DVs:
-                self.DVs[key].value = np.atleast_1d(dvDict[key]).astype("D")
+                self.DVs[key].value = dvDict[key].copy()
 
         # we need to update the design variables in the ESP model and rebuild
         built_successfully = self._updateModel()
@@ -781,6 +767,7 @@ class DVGeometryESP(DVGeoSketch):
         # # transpose dIdpt and vstack;
         # # Now vstack the result with seamBar as that is far as the
         # # forward FD jacobian went.
+        # tmp = np.vstack([dIdpt.T, dIdSeam.T])
         tmp = dIdpt.T
 
         # we also stack the pointset jacobian
@@ -794,18 +781,14 @@ class DVGeometryESP(DVGeoSketch):
         else:
             dIdx = dIdx_local
 
-        if self.useComposite:
-            dIdx = self.mapSensToComp(dIdx)
-            dIdxDict = self.convertSensitivityToDict(dIdx, useCompositeNames=True)
-
-        else:
-            # Now convert to dict:
-            dIdxDict = {}
-            for dvName in self.DVs:
-                dv = self.DVs[dvName]
-                jac_start = dv.globalStartInd
-                jac_end = jac_start + dv.nVal
-                dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
+        # Now convert to dict:
+        dIdxDict = {}
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
+            jac_start = dv.globalStartInd
+            jac_end = jac_start + dv.nVal
+            # dIdxDict[dvName] = np.array([dIdx[:, i]]).T
+            dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
 
         return dIdxDict
 
@@ -876,8 +859,7 @@ class DVGeometryESP(DVGeoSketch):
         * rows=[1], cols=[2]: pick a specific value
 
         .. note::
-            The indices are 1-indexed (per the OpenCSM standard)!!
-            They are not 0-indexed.
+            THE INDICES ARE 1-indexed (per the OpenCSM standard)!! Not 0-indexed.
 
         The design variable vector passed to pyOptSparse will be in row-major order.
         In other words, the vector will look like:

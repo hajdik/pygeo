@@ -1,4 +1,3 @@
-# External modules
 import numpy as np
 
 # Bounding box for root airfoil

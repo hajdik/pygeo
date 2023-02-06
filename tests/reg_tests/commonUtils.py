@@ -1,12 +1,8 @@
-# Standard Python modules
 import os
-
-# External modules
 import numpy as np
+from pygeo import DVGeometry, DVGeometryAxi
 from pyspline import Curve
 
-# First party modules
-from pygeo import DVGeometry, DVGeometryAxi
 
 ##################
 # DVGeometry Tests

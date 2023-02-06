@@ -1,24 +1,19 @@
-# Standard Python modules
-import sys
-
-# External modules
 import numpy as np
-
-# Local modules
-from .geo_utils.index_position import indexPosition1D, indexPosition2D, indexPosition3D
+import sys
+from .geo_utils.norm import eDist
 from .geo_utils.node_edge_face import (
     Edge,
-    EdgeCmpObject,
-    FaceCmpObject,
-    nodesFromEdge,
-    nodesFromFace,
+    setNodeValue,
     setEdgeValue,
     setFaceValue,
-    setNodeValue,
+    EdgeCmpObject,
+    nodesFromEdge,
+    nodesFromFace,
+    FaceCmpObject,
 )
-from .geo_utils.norm import eDist
 from .geo_utils.orientation import edgeOrientation, faceOrientation
-from .geo_utils.remove_duplicates import pointReduce, unique, uniqueIndex
+from .geo_utils.remove_duplicates import unique, uniqueIndex, pointReduce
+from .geo_utils.index_position import indexPosition1D, indexPosition2D, indexPosition3D
 
 # --------------------------------------------------------------
 #                Topology classes
@@ -45,9 +40,9 @@ class Topology:
         nEnt : int
             The number of "entities" in the topology class. This may be curves, faces or volumes.
         mNodeEnt : int
-            The number of nodes per entity. For curves it's 2, for surfaces 4 and for volumes 8.
+            The number of NODES per entity. For curves it's 2, for surfaces 4 and for volumes 8.
         mEdgeEnt : int
-            The number of edges per entity. For curves it's 1, for surfaces, 4 and for volumes, 12.
+            The number of EDGES per entity. For curves it's 1, for surfaces, 4 and for volumes, 12.
         mFaceEnt : int
             The number of faces per entity. For curves its's 0, for surfaces, 1 and for volumes, 6.
         mVolEnt : int

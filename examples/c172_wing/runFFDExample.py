@@ -1,9 +1,6 @@
-# External modules
+from pygeo import DVGeometry
 import numpy as np
 from stl import mesh
-
-# First party modules
-from pygeo import DVGeometry
 
 
 def create_fresh_dvgeo():
@@ -28,7 +25,7 @@ def create_fresh_dvgeo():
 
 # rst add local DV
 # Now that we have pointsets added, we should parameterize the geometry.
-# Adding local geometric design variables to make local modifications to FFD box
+# Adding local geometric design to make local modifications to FFD box
 # This option will perturb all the control points but only the y (up-down) direction
 DVGeo, stlmesh = create_fresh_dvgeo()
 DVGeo.addLocalDV("shape", lower=-0.5, upper=0.5, axis="y", scale=1.0)

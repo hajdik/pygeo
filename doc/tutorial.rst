@@ -12,4 +12,3 @@ In this section, there is a collection of example use cases for pyGeo.
     advanced_ffd
     update_pygeo
     cst_tutorial
-    esp_airfoil

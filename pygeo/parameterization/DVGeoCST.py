@@ -6,29 +6,34 @@ DVGeo: CST Parameterisation
 @Description : A DVGeo implementation based on the Class-Shape Transformation method
 """
 
-# External modules
-from mpi4py import MPI
+# ==============================================================================
+# Standard Python modules
+# ==============================================================================
+
+# ==============================================================================
+# External Python modules
+# ==============================================================================
 import numpy as np
+from mpi4py import MPI
 from scipy.special import factorial
 
 try:
-    # External modules
-    from prefoil.airfoil import Airfoil
     from prefoil.utils import readCoordFile
-
-    prefoilInstalled = True
+    from prefoil.airfoil import Airfoil
 except ImportError:
-    prefoilInstalled = False
+    raise ImportError("preFoil is required to use DVGeometryCST")
 
 try:
-    # External modules
     import matplotlib.pyplot as plt
 
     pltImport = True
 except ModuleNotFoundError:
     pltImport = False
 
-# Local modules
+
+# ==============================================================================
+# Extension modules
+# ==============================================================================
 from .BaseDVGeo import BaseDVGeometry
 from .designVars import cstDV
 
@@ -97,10 +102,6 @@ class DVGeometryCST(BaseDVGeometry):
         debug=False,
         tolTE=60.0,
     ):
-        # Check if preFoil is installed before initializing.
-        if not prefoilInstalled:
-            raise ImportError("preFoil is not installed and is required to use DVGeometryCST.")
-
         super().__init__(datFile)
         self.xIdx = idxChord
         self.yIdx = idxVertical
@@ -538,7 +539,7 @@ class DVGeometryCST(BaseDVGeometry):
 
         Examples
         --------
-        >>> optProb.addCon(.....wrt=DVGeo.getVarNames())
+        optProb.addCon(.....wrt=DVGeo.getVarNames())
         """
         return list(self.DVs.keys())
 

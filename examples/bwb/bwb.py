@@ -1,9 +1,6 @@
-# External modules
 import numpy as np
-from pyspline import Curve
-
-# First party modules
 from pygeo import pyGeo
+from pyspline import Curve
 
 # ==============================================================================
 # Start of Script

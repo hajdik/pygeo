@@ -1,35 +1,24 @@
-# Standard Python modules
 import os
 import unittest
-
-# External modules
-from baseclasses import BaseRegTest
 import numpy as np
-from parameterized import parameterized_class
+from baseclasses import BaseRegTest
+from pygeo import DVGeometry, DVConstraints
 from stl import mesh
-
-# First party modules
-from pygeo import DVConstraints, DVGeometry
+from parameterized import parameterized_class
 
 try:
-    # External modules
     import geograd  # noqa: F401
 
-    geogradInstalled = True
+    missing_geograd = False
 except ImportError:
-    geogradInstalled = False
+    missing_geograd = True
 
 try:
-    # External modules
-    import pysurf  # noqa: F401
-
-    pysurfInstalled = True
-except ImportError:
-    pysurfInstalled = False
-
-if pysurfInstalled:
-    # First party modules
     from pygeo import DVGeometryMulti
+
+    missing_pysurf = False
+except ImportError:
+    missing_pysurf = True
 
 
 def evalFunctionsSensFD(DVGeo, DVCon, fdstep=1e-2):
@@ -108,30 +97,29 @@ def generic_test_base(DVGeo, DVCon, handler, checkDerivs=True, fdstep=1e-4):
     return funcs, funcsSens
 
 
-test_params = [
-    {
-        # Standard one-level FFD
-        "name": "standard",
-        "child": False,
-        "multi": False,
-    },
-    {
-        # Deforming child FFD with a stationary parent FFD
-        "name": "child",
-        "child": True,
-        "multi": False,
-    },
-    {
-        # One deforming component FFD and a stationary component FFD
-        # The components do not intersect
-        "name": "multi",
-        "child": False,
-        "multi": True,
-    },
-]
-
-
-@parameterized_class(test_params)
+@parameterized_class(
+    [
+        {
+            # Standard one-level FFD
+            "name": "standard",
+            "child": False,
+            "multi": False,
+        },
+        {
+            # Deforming child FFD with a stationary parent FFD
+            "name": "child",
+            "child": True,
+            "multi": False,
+        },
+        {
+            # One deforming component FFD and a stationary component FFD
+            # The components do not intersect
+            "name": "multi",
+            "child": False,
+            "multi": True,
+        },
+    ]
+)
 class RegTestPyGeo(unittest.TestCase):
 
     N_PROCS = 1
@@ -143,7 +131,7 @@ class RegTestPyGeo(unittest.TestCase):
         self.base_path = os.path.dirname(os.path.abspath(__file__))
 
         # Skip multi component test if DVGeometryMulti cannot be imported (i.e. pySurf is not installed)
-        if self.multi and not pysurfInstalled:
+        if self.multi and missing_pysurf:
             self.skipTest("requires pySurf")
 
     def generate_dvgeo_dvcon(self, geometry, addToDVGeo=False, intersected=False):
@@ -842,7 +830,7 @@ class RegTestPyGeo(unittest.TestCase):
                 atol=1e-7,
             )
 
-    @unittest.skipUnless(geogradInstalled, "requires geograd")
+    @unittest.skipIf(missing_geograd, "requires geograd")
     def test_triangulatedSurface(self, train=False, refDeriv=False):
         refFile = os.path.join(self.base_path, "ref/test_DVConstraints_triangulatedSurface.ref")
         with BaseRegTest(refFile, train=train) as handler:
@@ -859,7 +847,7 @@ class RegTestPyGeo(unittest.TestCase):
             funcs, funcsSens = self.wing_test_twist(DVGeo, DVCon, handler)
             funcs, funcsSens = self.wing_test_deformed(DVGeo, DVCon, handler)
 
-    @unittest.skipUnless(geogradInstalled, "requires geograd")
+    @unittest.skipIf(missing_geograd, "requires geograd")
     def test_triangulatedSurface_intersected(self, train=False, refDeriv=False):
         refFile = os.path.join(self.base_path, "ref/test_DVConstraints_triangulatedSurface_intersected.ref")
         with BaseRegTest(refFile, train=train) as handler:
@@ -961,7 +949,7 @@ class RegTestPyGeo(unittest.TestCase):
             funcs, funcsSens = self.wing_test_deformed(DVGeo, DVCon, handler)
 
 
-@unittest.skipUnless(geogradInstalled, "requires geograd")
+@unittest.skipIf(missing_geograd, "requires geograd")
 class RegTestGeograd(unittest.TestCase):
 
     N_PROCS = 1

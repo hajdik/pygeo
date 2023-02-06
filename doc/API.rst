@@ -6,7 +6,7 @@ pyGeo API
 This package consists of the following modules:
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    DVConstraints
    DVGeometry
@@ -14,5 +14,7 @@ This package consists of the following modules:
    DVGeometryESP
    DVGeometryVSP
    DVGeometryCST
+   pyNetwork
    pyGeo
+   pyBlock
    geo_utils

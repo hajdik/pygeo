@@ -1,14 +1,9 @@
-# Standard Python modules
 import os
 import unittest
-
-# External modules
 import numpy as np
 from stl.mesh import Mesh
-
-# First party modules
 from pygeo import DVGeometry
-from pygeo.geo_utils import createFittedWingFFD, write_wing_FFD_file
+from pygeo.geo_utils import write_wing_FFD_file, createFittedWingFFD
 
 baseDir = os.path.dirname(os.path.abspath(__file__))
 
@@ -75,7 +70,7 @@ class TestFFDGeneration(unittest.TestCase):
         # Check that the generated FFD file matches the reference
         referenceFFD = DVGeometry(os.path.join(baseDir, "../../input_files/c172_fitted.xyz"))
         outputFFD = DVGeometry(outFile)
-        np.testing.assert_allclose(referenceFFD.FFD.coef, outputFFD.FFD.coef, rtol=1e-14)
+        np.testing.assert_allclose(referenceFFD.FFD.coef, outputFFD.FFD.coef, rtol=1e-15)
 
         # Check that the embedding works
         # This is not an actual test because no errors are raised if the projection does not work

@@ -4,21 +4,23 @@ DVGeometryCST: Test suite for the DVGeometryCST module.
 ==============================================================================
 """
 
+# ==============================================================================
 # Standard Python modules
-import os
+# ==============================================================================
 import unittest
-
-# External modules
-from mpi4py import MPI
-import numpy as np
+import os
 from parameterized import parameterized_class
 
-try:
-    # External modules
-    from prefoil.utils import readCoordFile
+# ==============================================================================
+# External Python modules
+# ==============================================================================
+import numpy as np
+from mpi4py import MPI
 
-    prefoilImported = True
-    # First party modules
+# Try importing prefoil and DVGeometryCST
+prefoilImported = True
+try:
+    from prefoil.utils import readCoordFile
     from pygeo import DVGeometryCST
 except ImportError:
     prefoilImported = False

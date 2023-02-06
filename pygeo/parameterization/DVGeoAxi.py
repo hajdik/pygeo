@@ -1,12 +1,7 @@
-# Standard Python modules
-from collections import OrderedDict
 import warnings
-
-# External modules
 import numpy as np
 from scipy import sparse
-
-# Local modules
+from collections import OrderedDict
 from .DVGeo import DVGeometry
 
 AXES_2_IDX = {"x": 0, "y": 1, "z": 2}
@@ -202,6 +197,7 @@ class DVGeometryAxi(DVGeometry):
       >>> DVGeo.addGlobalDV('wing_twist', 0.0, twist, lower=-10, upper=10)
       >>> # Now add local (shape) variables
       >>> DVGeo.addLocalDV('shape', lower=-0.5, upper=0.5, axis='y')
+      >>>
     """
 
     def __init__(self, fileName, center, collapse_into, *args, isComplex=False, child=False, **kwargs):
