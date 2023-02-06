@@ -1,41 +1,57 @@
-import openmdao.api as om
-from .. import DVGeometry, DVConstraints
-
-try:
-    from .. import DVGeometryVSP
-except ImportError:
-    # not everyone might have openvsp installed, and thats okay
-    pass
+# External modules
 from mpi4py import MPI
 import numpy as np
+import openmdao.api as om
+
+# Local modules
+from .. import DVConstraints, DVGeometry, DVGeometryESP, DVGeometryVSP
+
 
 # class that actually calls the dvgeometry methods
 class OM_DVGEOCOMP(om.ExplicitComponent):
     def initialize(self):
 
-        self.options.declare("ffd_file", default=None)
-        self.options.declare("vsp_file", default=None)
-        self.options.declare("vsp_options", default=None)
+        self.options.declare("file", default=None)
+        self.options.declare("type", default=None)
+        self.options.declare("options", default=None)
 
     def setup(self):
+        self.geo_type = self.options["type"]
 
         # create the DVGeo object that does the computations
-        if self.options["ffd_file"] is not None:
+        if self.geo_type == "ffd":
             # we are doing an FFD-based DVGeo
-            ffd_file = self.options["ffd_file"]
-            self.DVGeo = DVGeometry(ffd_file)
-        if self.options["vsp_file"] is not None:
-            # we are doing a VSP based DVGeo
-            vsp_file = self.options["vsp_file"]
-            vsp_options = self.options["vsp_options"]
-            self.DVGeo = DVGeometryVSP(vsp_file, comm=self.comm, **vsp_options)
+            if self.options["options"] is None:
+                ffd_options = {}
+            else:
+                ffd_options = self.options["options"]
+
+            self.DVGeo = DVGeometry(self.options["file"], **ffd_options)
+
+        elif self.geo_type == "vsp":
+            # we are doing a VSP-based DVGeo
+            if self.options["options"] is None:
+                vsp_options = {}
+            else:
+                vsp_options = self.options["options"]
+
+            self.DVGeo = DVGeometryVSP(self.options["file"], comm=self.comm, **vsp_options)
+
+        elif self.geo_type == "esp":
+            # we are doing an ESP-based DVGeo
+            if self.options["options"] is None:
+                esp_options = {}
+            else:
+                esp_options = self.options["options"]
+
+            self.DVGeo = DVGeometryESP(self.options["file"], comm=self.comm, **esp_options)
 
         self.DVCon = DVConstraints()
         self.DVCon.setDVGeo(self.DVGeo)
         self.omPtSetList = []
 
     def compute(self, inputs, outputs):
-        # check for inputs thathave been added but the points have not been added to dvgeo
+        # check for inputs that have been added but the points have not been added to dvgeo
         for var in inputs.keys():
             # check that the input name matches the convention for points
             if var[:2] == "x_":
@@ -66,6 +82,12 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         self.update_jac = True
 
     def nom_addChild(self, ffd_file):
+        # can only add a child to a FFD DVGeo
+        if self.geo_type != "ffd":
+            raise RuntimeError(
+                f"Only FFD-based DVGeo objects can have children added to them, not type:{self.geo_type}"
+            )
+
         # Add child FFD
         child_ffd = DVGeometry(ffd_file, child=True)
         self.DVGeo.addChild(child_ffd)
@@ -94,11 +116,12 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         self.DVGeo.addPointSet(points.reshape(len(points) // 3, 3), ptName, **kwargs)
         self.omPtSetList.append(ptName)
 
-        for i in range(len(self.DVGeo.children)):
-            # Embed points from parent if not already done
-            for pointSet in self.DVGeo.points:
-                if pointSet not in self.DVGeo.children[i].points:
-                    self.DVGeo.children[i].addPointSet(self.DVGeo.points[pointSet], pointSet)
+        if self.geo_type == "ffd":
+            for i in range(len(self.DVGeo.children)):
+                # Embed points from parent if not already done
+                for pointSet in self.DVGeo.points:
+                    if pointSet not in self.DVGeo.children[i].points:
+                        self.DVGeo.children[i].addPointSet(self.DVGeo.points[pointSet], pointSet)
 
         if add_output:
             # add an output to the om component
@@ -109,9 +132,16 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         for k, v in point_dict.items():
             self.nom_addPointSet(v, k)
 
-    def nom_addGlobalDV(self, dvName, value, func, childIdx=None):
+    def nom_addGlobalDV(self, dvName, value, func, childIdx=None, isComposite=False):
+        # global DVs are only added to FFD-based DVGeo objects
+        if self.geo_type != "ffd":
+            raise RuntimeError(f"Only FFD-based DVGeo objects can use global DVs, not type:{self.geo_type}")
+
         # define the input
-        self.add_input(dvName, distributed=False, shape=len(value))
+        # When composite DVs are used, input is not required for the default DVs. Now the composite DVs are
+        # the actual DVs. So OpenMDAO don't need the default DVs as inputs.
+        if not isComposite:
+            self.add_input(dvName, distributed=False, shape=len(value))
 
         # call the dvgeo object and add this dv
         if childIdx is None:
@@ -119,15 +149,35 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         else:
             self.DVGeo.children[childIdx].addGlobalDV(dvName, value, func)
 
-    def nom_addLocalDV(self, dvName, axis="y", pointSelect=None, childIdx=None):
+    def nom_addLocalDV(self, dvName, axis="y", pointSelect=None, childIdx=None, isComposite=False):
+        # local DVs are only added to FFD-based DVGeo objects
+        if self.geo_type != "ffd":
+            raise RuntimeError(f"Only FFD-based DVGeo objects can use local DVs, not type:{self.geo_type}")
+
         if childIdx is None:
             nVal = self.DVGeo.addLocalDV(dvName, axis=axis, pointSelect=pointSelect)
         else:
             nVal = self.DVGeo.children[childIdx].addLocalDV(dvName, axis=axis, pointSelect=pointSelect)
-        self.add_input(dvName, distributed=False, shape=nVal)
+
+        # define the input
+        # When composite DVs are used, input is not required for the default DVs. Now the composite DVs are
+        # the actual DVs. So OpenMDAO don't need the default DVs as inputs.
+        if not isComposite:
+            self.add_input(dvName, distributed=False, shape=nVal)
         return nVal
 
-    def nom_addVSPVariable(self, component, group, parm, **kwargs):
+    def nom_addGeoCompositeDV(self, dvName, ptSetName=None, u=None, scale=None, **kwargs):
+        # call the dvgeo object and add this dv
+        self.DVGeo.addCompositeDV(dvName, ptSetName=ptSetName, u=u, scale=scale, **kwargs)
+        val = self.DVGeo.getValues()
+
+        # define the input
+        self.add_input(dvName, distributed=False, shape=self.DVGeo.getNDV(), val=val[dvName][0])
+
+    def nom_addVSPVariable(self, component, group, parm, isComposite=False, **kwargs):
+        # VSP DVs are only added to VSP-based DVGeo objects
+        if self.geo_type != "vsp":
+            raise RuntimeError(f"Only VSP-based DVGeo objects can use VSP DVs, not type:{self.geo_type}")
 
         # actually add the DV to VSP
         self.DVGeo.addVariable(component, group, parm, **kwargs)
@@ -138,8 +188,28 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         # get the value
         val = self.DVGeo.DVs[dvName].value.copy()
 
+        # define the input
+        # When composite DVs are used, input is not required for the default DVs. Now the composite DVs are
+        # the actual DVs. So OpenMDAO don't need the default DVs as inputs.
+        if not isComposite:
+            self.add_input(dvName, distributed=False, shape=1, val=val)
+
+    def nom_addESPVariable(self, desmptr_name, isComposite=False, **kwargs):
+        # ESP DVs are only added to VSP-based DVGeo objects
+        if self.geo_type != "esp":
+            raise RuntimeError(f"Only ESP-based DVGeo objects can use ESP DVs, not type:{self.geo_type}")
+
+        # actually add the DV to ESP
+        self.DVGeo.addVariable(desmptr_name, **kwargs)
+
+        # get the value
+        val = self.DVGeo.DVs[desmptr_name].value.copy()
+
         # add the input with the correct value, VSP DVs always have a size of 1
-        self.add_input(dvName, distributed=False, shape=1, val=val)
+        # When composite DVs are used, input is not required for the default DVs. Now the composite DVs are
+        # the actual DVs. So OpenMDAO don't need the default DVs as inputs.
+        if not isComposite:
+            self.add_input(desmptr_name, distributed=False, shape=val.shape, val=val)
 
     def nom_addThicknessConstraints2D(self, name, leList, teList, nSpan=10, nChord=10):
         self.DVCon.addThicknessConstraints2D(leList, teList, nSpan, nChord, lower=1.0, name=name)
@@ -235,6 +305,10 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         # self.add_output(f"{name}_perim", distributed=True, shape=0)
 
     def nom_addRefAxis(self, childIdx=None, **kwargs):
+        # references axes are only needed in FFD-based DVGeo objects
+        if self.geo_type != "ffd":
+            raise RuntimeError(f"Only FFD-based DVGeo objects can use reference axes, not type:{self.geo_type}")
+
         # we just pass this through
         if childIdx is None:
             return self.DVGeo.addRefAxis(**kwargs)

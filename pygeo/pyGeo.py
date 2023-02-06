@@ -1,16 +1,18 @@
-# ======================================================================
-#         Imports
-# ======================================================================
-import os
+# Standard Python modules
 import copy
+import os
+
+# External modules
+from baseclasses.utils import Error
 import numpy as np
+from pyspline import Curve, Surface
+from pyspline.utils import closeTecplot, openTecplot, writeTecplot2D
 from scipy import sparse
 from scipy.sparse.linalg.dsolve import factorized
-from pyspline import Curve, Surface
-from pyspline.utils import openTecplot, writeTecplot2D, closeTecplot
+
+# Local modules
 from . import geo_utils
 from .topology import SurfaceTopology
-from baseclasses.utils import Error
 
 
 class pyGeo:
@@ -36,7 +38,7 @@ class pyGeo:
         List of the scaling factors (chord) for cross sections.
         Length = N
     offset : List or array
-        List of x-y offset to apply BEFORE scaling. Length = N
+        List of x-y offset to apply *before* scaling. Length = N
     Xsec : List or array
         List of spatial coordinates as to the placement of
         cross sections. Size (N, 3)
@@ -1131,6 +1133,7 @@ class pyGeo:
             File name of tin file. Should have .tin extension.
         """
         f = open(fileName, "w")
+        # Standard Python modules
         import datetime
 
         # Write the required header info here:
@@ -1240,7 +1243,7 @@ class pyGeo:
         This algorithm is not efficient at all.  We basically do the
         curve-surface projection algorithm for each surface the loop
         back over them to see which is the best in terms of closest
-        distance. This intent is that the curve ACTUALLY intersects
+        distance. This intent is that the curve *actually* intersects
         one of the surfaces.
         """
 
