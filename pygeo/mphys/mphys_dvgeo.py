@@ -213,9 +213,7 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         DVGeo_2_name="default",
         rho=50.0,
         heuristic_dist=None,
-        perim_scale=0.1,
         max_perim=3.0,
-        addToPyOpt=True,
     ):
         self.DVCon.addTriangulatedSurfaceConstraint(
             surface_1_name=surface_1_name,
@@ -224,19 +222,17 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
             DVGeo_2_name=DVGeo_2_name,
             rho=rho,
             heuristic_dist=heuristic_dist,
-            perim_scale=perim_scale,
             max_perim=max_perim,
             name=name,
-            addToPyOpt=addToPyOpt,
         )
 
-        comm = self.comm
-        if comm.rank == 0:
-            self.add_output(f"{name}_KS", distributed=True, val=0, shape=1)
-            self.add_output(f"{name}_perim", distributed=True, val=0, shape=1)
-        else:
-            self.add_output(f"{name}_KS", distributed=True, shape=0)
-            self.add_output(f"{name}_perim", distributed=True, shape=0)
+        # comm = self.comm
+        # if comm.rank == 0:
+        self.add_output(f"{name}_KS", distributed=False, val=0, shape=1)
+        self.add_output(f"{name}_perim", distributed=False, val=0, shape=1)
+        # else:
+        # self.add_output(f"{name}_KS", distributed=True, shape=0)
+        # self.add_output(f"{name}_perim", distributed=True, shape=0)
 
     def nom_addRefAxis(self, childIdx=None, **kwargs):
         # we just pass this through
@@ -269,14 +265,55 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
                 self.update_jac = False
 
             for constraintname in self.constraintfuncsens:
+                # print(f"constraint name {constraintname}")
+
                 for dvname in self.constraintfuncsens[constraintname]:
+                    # if constraintname == "trisurf_KS":
+                    #     if self.comm.rank == 0:
+                    #         print(
+                    #             f"trisurf_KS {self.constraintfuncsens[constraintname][dvname]} on first proc for {dvname} size is"
+                    #         )
+
+                    #         if np.ndim(self.constraintfuncsens[constraintname][dvname]) != 0:
+                    #             print(f"and size is {self.constraintfuncsens[constraintname][dvname].size}")
+                    #         else:
+                    #             print("and dimension is 0")
+
+                    #     if self.comm.rank == 1:
+                    #         print(
+                    #             f"trisurf_KS {self.constraintfuncsens[constraintname][dvname]} on second proc for {dvname} size is"
+                    #         )
+
+                    #         if np.ndim(self.constraintfuncsens[constraintname][dvname]) != 0:
+                    #             print(f"and size is {self.constraintfuncsens[constraintname][dvname].size}")
+                    #         else:
+                    #             print("and dimension is 0")
+
+                    if constraintname == "trisurf_perim":
+                        if self.comm.rank == 0:
+                            print(
+                                f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].size}"
+                            )
+                    if self.comm.rank == 1:
+                        print(
+                            f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].size}"
+                        )
+
                     if dvname in d_inputs:
                         dcdx = self.constraintfuncsens[constraintname][dvname]
-                        if self.comm.rank == 0:
+
+                        if constraintname == "trisurf_perim" or constraintname == "trisurf_KS":
+                            # print("no try something else")
                             dout = d_outputs[constraintname]
                             jvtmp = np.dot(np.transpose(dcdx), dout)
+
                         else:
-                            jvtmp = 0.0
+                            if self.comm.rank == 0:
+                                dout = d_outputs[constraintname]
+                                jvtmp = np.dot(np.transpose(dcdx), dout)
+                            else:
+                                jvtmp = 0.0
+
                         d_inputs[dvname] += jvtmp
                         # OM does the reduction itself
                         # d_inputs[dvname] += self.comm.reduce(jvtmp, op=MPI.SUM, root=0)
