@@ -251,6 +251,8 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         # only do the computations when we have more than zero entries in d_inputs in the reverse mode
         ni = len(list(d_inputs.keys()))
 
+        # print("\ncompute_jacvec\n")
+
         if mode == "rev" and ni > 0:
 
             # this flag will be set to True after every compute call.
@@ -264,10 +266,15 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
                 # set the flag to False so we dont run the update again if this is called w/o a compute in between
                 self.update_jac = False
 
+            # f1 = open("p1.txt", "w")
+            # f2 = open("p2.txt", "w")
+
             for constraintname in self.constraintfuncsens:
                 # print(f"constraint name {constraintname}")
 
                 for dvname in self.constraintfuncsens[constraintname]:
+                    # print(f"dvname {dvname}")
+
                     # if constraintname == "trisurf_KS":
                     #     if self.comm.rank == 0:
                     #         print(
@@ -292,12 +299,18 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
                     if constraintname == "trisurf_perim":
                         if self.comm.rank == 0:
                             print(
-                                f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].size}"
+                                f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
                             )
-                    if self.comm.rank == 1:
-                        print(
-                            f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].size}"
-                        )
+                            # f1.write(
+                            #     f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}\n"
+                            # )
+                        if self.comm.rank == 1:
+                            print(
+                                f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
+                            )
+                            # f2.write(
+                            #     f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}\n"
+                            # )
 
                     if dvname in d_inputs:
                         dcdx = self.constraintfuncsens[constraintname][dvname]
