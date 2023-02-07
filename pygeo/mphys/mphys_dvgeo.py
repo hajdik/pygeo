@@ -216,6 +216,7 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         max_perim=3.0,
     ):
         self.DVCon.addTriangulatedSurfaceConstraint(
+            comm=self.comm,
             surface_1_name=surface_1_name,
             DVGeo_1_name=DVGeo_1_name,
             surface_2_name=surface_2_name,
@@ -226,13 +227,13 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
             name=name,
         )
 
-        # comm = self.comm
-        # if comm.rank == 0:
-        self.add_output(f"{name}_KS", distributed=False, val=0, shape=1)
-        self.add_output(f"{name}_perim", distributed=False, val=0, shape=1)
-        # else:
-        # self.add_output(f"{name}_KS", distributed=True, shape=0)
-        # self.add_output(f"{name}_perim", distributed=True, shape=0)
+        comm = self.comm
+        if comm.rank == 0:
+            self.add_output(f"{name}_KS", distributed=True, val=0, shape=1)
+            self.add_output(f"{name}_perim", distributed=True, val=0, shape=1)
+        else:
+            self.add_output(f"{name}_KS", distributed=True, shape=0)
+            self.add_output(f"{name}_perim", distributed=True, shape=0)
 
     def nom_addRefAxis(self, childIdx=None, **kwargs):
         # we just pass this through
@@ -315,17 +316,17 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
                     if dvname in d_inputs:
                         dcdx = self.constraintfuncsens[constraintname][dvname]
 
-                        if constraintname == "trisurf_perim" or constraintname == "trisurf_KS":
-                            # print("no try something else")
+                        # if constraintname == "trisurf_perim" or constraintname == "trisurf_KS":
+                        #     # print("no try something else")
+                        #     dout = d_outputs[constraintname]
+                        #     jvtmp = np.dot(np.transpose(dcdx), dout)
+
+                        # else:
+                        if self.comm.rank == 0:
                             dout = d_outputs[constraintname]
                             jvtmp = np.dot(np.transpose(dcdx), dout)
-
                         else:
-                            if self.comm.rank == 0:
-                                dout = d_outputs[constraintname]
-                                jvtmp = np.dot(np.transpose(dcdx), dout)
-                            else:
-                                jvtmp = 0.0
+                            jvtmp = 0.0
 
                         d_inputs[dvname] += jvtmp
                         # OM does the reduction itself
