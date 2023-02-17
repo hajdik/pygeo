@@ -110,8 +110,7 @@ class TriangulatedSurfaceConstraint(GeometricConstraint):
             which will apply to *ALL* the local DV groups or a single string specifying
             a particular configuration.
         """
-        # get the CFD triangulated mesh updates. need addToDVGeo = True when
-        # running setSurface()
+        # get the CFD triangulated mesh updates. need addToDVGeo = True when running setSurface()
 
         # check if the first mesh has a DVGeo, and if it does, update the points
 

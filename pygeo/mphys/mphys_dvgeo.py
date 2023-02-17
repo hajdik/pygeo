@@ -271,47 +271,51 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
             # f2 = open("p2.txt", "w")
 
             for constraintname in self.constraintfuncsens:
-                # print(f"constraint name {constraintname}")
+                print(f"constraint name {constraintname}")
 
                 for dvname in self.constraintfuncsens[constraintname]:
                     # print(f"dvname {dvname}")
 
-                    # if constraintname == "trisurf_KS":
-                    #     if self.comm.rank == 0:
-                    #         print(
-                    #             f"trisurf_KS {self.constraintfuncsens[constraintname][dvname]} on first proc for {dvname} size is"
-                    #         )
-
-                    #         if np.ndim(self.constraintfuncsens[constraintname][dvname]) != 0:
-                    #             print(f"and size is {self.constraintfuncsens[constraintname][dvname].size}")
-                    #         else:
-                    #             print("and dimension is 0")
-
-                    #     if self.comm.rank == 1:
-                    #         print(
-                    #             f"trisurf_KS {self.constraintfuncsens[constraintname][dvname]} on second proc for {dvname} size is"
-                    #         )
-
-                    #         if np.ndim(self.constraintfuncsens[constraintname][dvname]) != 0:
-                    #             print(f"and size is {self.constraintfuncsens[constraintname][dvname].size}")
-                    #         else:
-                    #             print("and dimension is 0")
-
-                    if constraintname == "trisurf_perim":
+                    if constraintname == "trisurf_KS":
                         if self.comm.rank == 0:
                             print(
-                                f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
+                                f"trisurf_KS on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
                             )
-                            # f1.write(
-                            #     f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}\n"
-                            # )
+                            print(
+                                f"trisurf_KS on first proc for {dvname} val is {self.constraintfuncsens[constraintname][dvname]}"
+                            )
+
                         if self.comm.rank == 1:
                             print(
-                                f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
+                                f"trisurf_KS on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
                             )
-                            # f2.write(
-                            #     f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}\n"
-                            # )
+                            print(
+                                f"trisurf_KS on second proc for {dvname} val is {self.constraintfuncsens[constraintname][dvname]}"
+                            )
+
+                    # if constraintname == "trisurf_perim":
+                    #     if self.comm.rank == 0:
+                    # print(
+                    #     f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
+                    # )
+                    # print(
+                    #     f"trisurf_perim on first proc for {dvname} val is {self.constraintfuncsens[constraintname][dvname]}"
+                    # )
+                    # f1.write(
+                    #     f"trisurf_perim on first proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}\n"
+                    # )
+                    # if self.comm.rank == 1:
+                    # print(
+                    #     f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}"
+                    # )
+
+                    # print(
+                    #     f"trisurf_perim on second proc for {dvname} val is {self.constraintfuncsens[constraintname][dvname]}"
+                    # )
+
+                    # f2.write(
+                    #     f"trisurf_perim on second proc for {dvname} size is {self.constraintfuncsens[constraintname][dvname].shape}\n"
+                    # )
 
                     if dvname in d_inputs:
                         dcdx = self.constraintfuncsens[constraintname][dvname]
@@ -325,10 +329,10 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
                         if self.comm.rank == 0:
                             dout = d_outputs[constraintname]
                             jvtmp = np.dot(np.transpose(dcdx), dout)
+                            d_inputs[dvname] += jvtmp
                         else:
                             jvtmp = 0.0
 
-                        d_inputs[dvname] += jvtmp
                         # OM does the reduction itself
                         # d_inputs[dvname] += self.comm.reduce(jvtmp, op=MPI.SUM, root=0)
 
