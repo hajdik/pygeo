@@ -48,7 +48,6 @@ class pyBlock:
     """
 
     def __init__(self, initType, fileName=None, FFD=False, symmPlane=None, kmax=4, **kwargs):
-
         self.initType = initType
         self.FFD = False
         self.topo = None  # The topology of the volumes/surface
@@ -290,7 +289,7 @@ class pyBlock:
         NN = sparse.csr_matrix((vals, colInd, rowPtr))
         NNT = NN.T
         NTN = NNT * NN
-        solve = linalg.dsolve.factorized(NTN)
+        solve = linalg.factorized(NTN)
         self.coef = np.zeros((nCtl, 3))
         for idim in range(3):
             self.coef[:, idim] = solve(NNT * pts[:, idim])
@@ -422,7 +421,6 @@ class pyBlock:
             for ivol in range(self.nVol):
                 for iedge in range(12):
                     if self.topo.edges[self.topo.edgeLink[ivol][iedge]].dg == idg:
-
                         if self.topo.edgeDir[ivol][iedge] == -1:
                             flip.append(True)
                         else:
@@ -449,7 +447,6 @@ class pyBlock:
             for ivol in range(self.nVol):
                 for iedge in range(12):
                     if self.topo.edges[self.topo.edgeLink[ivol][iedge]].dg == idg:
-
                         if iedge in [0, 1, 4, 5]:
                             if flip[counter]:
                                 self.vols[ivol].tu = newKnotVecFlip.copy()
@@ -859,6 +856,10 @@ class pyBlock:
         w0 = 0.0
 
         for i in range(N):
+            # Do not project this point if it is outside the convex hull and we are only interested in interior points
+            if interiorOnly and not isInsideHull[i]:
+                continue
+
             for j in range(self.nVol):
                 iVol = volList[j]
                 u0, v0, w0, D0 = self.vols[iVol].projectPoint(x0[i], eps=eps, nIter=nIter)

@@ -194,7 +194,6 @@ class LinearConstraint:
         # Local Shape Variables
         for key in self.DVGeo.DV_listLocal:
             if self.config is None or self.config in self.DVGeo.DV_listLocal[key].config:
-
                 # end for (indSet loop)
                 cons = self.DVGeo.DV_listLocal[key].mapIndexSets(self.indSetA, self.indSetB)
                 ncon = len(cons)
@@ -215,7 +214,6 @@ class LinearConstraint:
         # Section local shape variables
         for key in self.DVGeo.DV_listSectionLocal:
             if self.config is None or self.config in self.DVGeo.DV_listSectionLocal[key].config:
-
                 # end for (indSet loop)
                 cons = self.DVGeo.DV_listSectionLocal[key].mapIndexSets(self.indSetA, self.indSetB)
                 ncon = len(cons)
@@ -236,7 +234,6 @@ class LinearConstraint:
         # Section local shape variables
         for key in self.DVGeo.DV_listSpanwiseLocal:
             if self.config is None or self.config in self.DVGeo.DV_listSpanwiseLocal[key].config:
-
                 # end for (indSet loop)
                 cons = self.DVGeo.DV_listSpanwiseLocal[key].mapIndexSets(self.indSetA, self.indSetB)
                 ncon = len(cons)

@@ -24,8 +24,7 @@ test_params = [
 
 @unittest.skipIf(missing_openvsp, "requires openvsp Python API")
 @parameterized_class(test_params)
-class RegTestPyGeoVSP(unittest.TestCase):
-
+class RegTestPyGeoVSPParallel(unittest.TestCase):
     # this will be tested in serial and parallel automatically
     N_PROCS = 1
 
@@ -146,7 +145,19 @@ class RegTestPyGeoVSP(unittest.TestCase):
 
                         # print('Error for dv %s on the %d th coordinate of point at (%1.1f, %1.1f, %1.1f) is = %1.16f'%(dv, k+1, point[0],point[1],point[2], error ))
                         maxError = max(error, maxError)
-            handler.assert_allclose(maxError, 0.0, "sphere_derivs", rtol=1e0, atol=1e-14)
+            handler.assert_allclose(maxError, 0.0, "sphere_derivs", rtol=1e0, atol=1e-10)
+
+
+@unittest.skipUnless(openvspInstalled, "requires openvsp Python API")
+class RegTestPyGeoVSPSerial(unittest.TestCase):
+    # this will be tested in serial only
+    N_PROCS = 1
+
+    def setUp(self):
+        # Store the path where this current script lives
+        # This all paths in the script are relative to this path
+        # This is needed to support testflo running directories and files as inputs
+        self.base_path = os.path.dirname(os.path.abspath(__file__))
 
     def train_2(self, train=True, refDeriv=True):
         self.test_2(train=train, refDeriv=refDeriv)

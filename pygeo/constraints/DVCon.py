@@ -1081,7 +1081,6 @@ class DVConstraints:
         DVGeoName="default",
         compNames=None,
     ):
-
         """This is similar to addLocationConstraints1D except that the actual
         poly line is determined by first projecting points on to the
         surface in a similar manner as addConstraints1D, and then
@@ -2180,7 +2179,6 @@ class DVConstraints:
         DVGeoName="default",
         compNames=None,
     ):
-
         """Code for doing landing gear post constraints on the fly in an
         optimization. As it turns out, this is a critical constraint
         for wing-mounted landing gear and high-aspect ratio swept
@@ -3198,7 +3196,6 @@ class DVConstraints:
         )
 
     def _checkDVGeo(self, name="default"):
-
         """check if DVGeo exists"""
         if name not in self.DVGeometries.keys():
             raise Error(
@@ -3256,7 +3253,6 @@ class DVConstraints:
             te_span_s = np.array([])
 
             for i in range(numSegments):
-
                 # Only include the endpoint if this is the last segment to avoid double counting points
                 if i == numSegments - 1:
                     endpoint = True

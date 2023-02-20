@@ -12,10 +12,9 @@ import numpy as np
 # class that actually calls the dvgeometry methods
 class OM_DVGEOCOMP(om.ExplicitComponent):
     def initialize(self):
-
-        self.options.declare("ffd_file", default=None)
-        self.options.declare("vsp_file", default=None)
-        self.options.declare("vsp_options", default=None)
+        self.options.declare("file", default=None)
+        self.options.declare("type", default=None)
+        self.options.declare("options", default=None)
 
     def setup(self):
 
@@ -255,7 +254,6 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
         # print("\ncompute_jacvec\n")
 
         if mode == "rev" and ni > 0:
-
             # this flag will be set to True after every compute call.
             # if it is true, we assume the design has changed so we re-run the sensitivity update
             # there can be hundreds of calls to this routine due to thickness constraints,
@@ -348,7 +346,6 @@ class OM_DVGEOCOMP(om.ExplicitComponent):
 
                     # global_all_zeros is a numpy array of size 1
                     if not global_all_zeros[0]:
-
                         # TODO totalSensitivityTransProd is broken. does not work with zero surface nodes on a proc
                         # xdot = self.DVGeo.totalSensitivityTransProd(dout, ptSetName)
                         xdot = self.DVGeo.totalSensitivity(dout, ptSetName)

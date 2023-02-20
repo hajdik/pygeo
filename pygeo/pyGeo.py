@@ -5,9 +5,9 @@ import os
 import copy
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg.dsolve import factorized
-from pyspline import Curve, Surface
-from pyspline.utils import openTecplot, writeTecplot2D, closeTecplot
+from scipy.sparse.linalg import factorized
+
+# Local modules
 from . import geo_utils
 from .topology import SurfaceTopology
 from baseclasses.utils import Error
@@ -596,7 +596,6 @@ class pyGeo:
         print("Computing Tip surfaces ...")
         # # Add on additional surfaces if required for a rounded pinch tip
         if tip == "rounded":
-
             # Generate the midpoint of the coefficients
             midPts = np.zeros([ncoef, 3])
             upVec = np.zeros([ncoef, 3])
@@ -973,7 +972,6 @@ class pyGeo:
         edgeLabels=False,
         nodeLabels=False,
     ):
-
         """Write the pyGeo Object to Tecplot dat file
 
         Parameters

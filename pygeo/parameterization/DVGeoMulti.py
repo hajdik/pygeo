@@ -252,10 +252,8 @@ class DVGeometryMulti:
         # before we do anything, we need to create surface ADTs
         # for which the user provided triangulated meshes
         for comp in compNames:
-
             # check if we have a trimesh for this component
             if self.comps[comp].triMesh:
-
                 # Now we build the ADT using pySurf
                 # Set bounding box for new tree
                 BBox = np.zeros((2, 3))
@@ -293,7 +291,6 @@ class DVGeometryMulti:
 
         # we now need to create the component mapping information
         for i in range(self.points[ptName].nPts):
-
             # initial flags
             inFFD = False
             proj = False
@@ -301,7 +298,6 @@ class DVGeometryMulti:
 
             # loop over components and check if this point is in a single BBox
             for comp in compNames:
-
                 # apply a small tolerance for the bounding box in case points are coincident with the FFD
                 boundTol = 1e-16
                 xMin = self.comps[comp].xMin
@@ -315,7 +311,6 @@ class DVGeometryMulti:
                     and xMin[1] < points[i, 1] < xMax[1]
                     and xMin[2] < points[i, 2] < xMax[2]
                 ):
-
                     # add this component to the projection list
                     projList.append(comp)
 
@@ -330,7 +325,6 @@ class DVGeometryMulti:
 
             # project this point to components, we need to set inComp string
             if proj:
-
                 # set a high initial distance
                 dMin2 = 1e10
 
@@ -338,7 +332,6 @@ class DVGeometryMulti:
                 for comp in compNames:
                     # check if this component is in the projList
                     if comp in projList:
-
                         # check if we have an ADT:
                         if self.comps[comp].triMesh:
                             # Initialize reference values (see explanation above)
@@ -828,7 +821,6 @@ class DVGeometryMulti:
         dvOffset = 0
         # we need to call computeTotalJacobian from all comps and get the jacobians for this pointset
         for comp in self.compNames:
-
             # number of design variables
             nDVComp = self.comps[comp].DVGeo.getNDV()
 
@@ -853,7 +845,6 @@ class DVGeometryMulti:
 
 class component:
     def __init__(self, name, DVGeo, nodes, triConn, triConnStack, barsConn, xMin, xMax):
-
         # save the info
         self.name = name
         self.DVGeo = DVGeo
@@ -1085,7 +1076,6 @@ class CompIntersection:
         self.seam = self._getIntersectionSeam(comm)
 
     def addPointSet(self, pts, ptSetName, compMap, comm):
-
         # Figure out which points this intersection object has to deal with
 
         # Use pySurf to project the point on curve
@@ -1131,7 +1121,6 @@ class CompIntersection:
             halfdStar = dStar / 2.0
 
             if d[i] < dStar:
-
                 # Compute the factor
                 if d[i] < halfdStar:
                     factor = 0.5 * (d[i] / halfdStar) ** 3
@@ -1155,7 +1144,6 @@ class CompIntersection:
             }
 
             if nPoints > 0 and self.excludeSurfaces:
-
                 # Associate points with the excluded surfaces
                 for surface in self.excludeSurfaces:
                     surfaceEps = self.excludeSurfaces[surface]
@@ -1197,7 +1185,6 @@ class CompIntersection:
 
             # maybe we can do this vectorized
             for ind in indices:
-
                 # check compA
                 if ind in compMap[self.compA.name]:
                     flagA = True
@@ -1230,7 +1217,6 @@ class CompIntersection:
 
             # if we include the feature curves in the warping, we also need to project the added points to the intersection and feature curves and determine how the points map to the curves
             if self.incCurves:
-
                 # convert the list to an array
                 # we specify the dtype because numpy cannot know the type when 'indices' is empty
                 indices = np.array(indices, dtype="intc")
@@ -1283,7 +1269,6 @@ class CompIntersection:
                 # now loop over feature curves and use the epsilon that each curve has
                 # to determine which points maps to which curve
                 for curveName in allCurves:
-
                     # get the epsilon for this curve
                     # we map the points closer than eps to this curve
                     eps = self.curveEpsDict[curveName]
@@ -1339,7 +1324,6 @@ class CompIntersection:
 
                 # we need to figure out if we have any points mapped to curves on comp A
                 for curveName in allCurves:
-
                     # get the indices mapped to this curve, on this proc
                     idxs = self.curveProjIdx[ptSetName][curveName]
 
@@ -1354,7 +1338,6 @@ class CompIntersection:
                     self.nCurvePts[ptSetName][curveName] = nPtsTotal
 
     def update(self, ptSetName, delta):
-
         """Update the delta in ptSetName with our correction. The delta need
         to be supplied as we will be changing it and returning them
         """
@@ -1515,15 +1498,42 @@ class CompIntersection:
         if self.projectFlag:
             seamBar += self.seamBarProj[ptSetName]
 
-        for k in range(dIdPt.shape[0]):
-            for i in range(len(factors)):
+        for i in range(len(factors)):
+            # j is the index of the point in the full set we are working with.
+            j = indices[i]
 
-                # j is the index of the point in the full set we are working with.
-                j = indices[i]
+            # coordinates of the original point
+            rp = pts[j]
 
-                # coordinates of the original point
-                rp = pts[j]
+            # Compute the distances from the point being updated to the first end point of each element
+            # The distances are scaled by the user-specified anisotropy in each direction
+            dist_x = (r0[:, 0] - rp[0]) * self.anisotropy[0]
+            dist_y = (r0[:, 1] - rp[1]) * self.anisotropy[1]
+            dist_z = (r0[:, 2] - rp[2]) * self.anisotropy[2]
 
+            # Compute b and c coefficients
+            b = 2 * (length_x * dist_x + length_y * dist_y + length_z * dist_z)
+            c = dist_x**2 + dist_y**2 + dist_z**2
+
+            # Compute some reccurring terms
+            disc = b * b - 4 * a * c
+            sabc = np.sqrt(np.maximum(a + b + c, 0.0))
+            sc = np.sqrt(c)
+
+            # Compute denominators for the integral evaluations
+            den1 = disc * sabc - eps
+            den2 = disc * sc - eps
+
+            # integral evaluations
+            eval1 = (-2 * (2 * a + b) / den1 + 2 * b / den2) * length
+            eval2 = ((2 * b + 4 * c) / den1 - 4 * c / den2) * length
+
+            # denominator only gets one integral
+            den = np.sum(eval1)
+
+            evalDiff = eval1 - eval2
+
+            for k in range(dIdPt.shape[0]):
                 # This is the local seed (well the 3 seeds for the point)
                 localVal = dIdPt[k, j, :] * (1 - factors[i])
 
@@ -1616,7 +1626,6 @@ class CompIntersection:
 
         # loop over the feature curves that we need to project
         for curveName in self.featureCurveNames:
-
             # get the indices of points we need to project
             idx = self.curveProjIdx[ptSetName][curveName]
 
@@ -1827,7 +1836,6 @@ class CompIntersection:
 
         # call the actual driver with the info to prevent code multiplication
         if flagA:
-
             # Project remaining points to the component as a whole
             indAComp = self.projData[ptSetName]["compA"]["indAComp"]
             if indAComp:
@@ -1875,7 +1883,6 @@ class CompIntersection:
 
         # do the same for B
         if flagB:
-
             indBComp = self.projData[ptSetName]["compB"]["indBComp"]
             if indBComp:
                 dIdptB = dIdpt[:, indBComp]
@@ -1988,14 +1995,12 @@ class CompIntersection:
 
         # loop over the curves
         for curveName in self.featureCurveNames:
-
             # sizes and displacements for this curve
             sizes = self.curveProjData[ptSetName][curveName]["sizes"]
             disp = self.curveProjData[ptSetName][curveName]["disp"]
 
             # we get the seeds from compA seeds
             if curveName in self.curvesOnA:
-
                 if flagA:
                     # contribution on this proc
                     deltaBar = deltaA_b[:, disp[rank] : disp[rank] + sizes[rank]].copy()
@@ -2009,7 +2014,6 @@ class CompIntersection:
 
             # seeds from compB
             elif curveName in self.curvesOnB:
-
                 if flagB:
                     # contribution on this proc
                     deltaBar = deltaB_b[:, disp[rank] : disp[rank] + sizes[rank]].copy()
@@ -2047,7 +2051,6 @@ class CompIntersection:
 
                 # run the bwd projection for everyfunction
                 for k in range(N):
-
                     # contribution from delta
                     xyzProjb = deltaBar[k].copy()
 
@@ -2144,7 +2147,6 @@ class CompIntersection:
             return
 
         for j in indices:
-
             # point coordinates with the baseline design
             # this is the point we will warp
             ptCoords = pts0[j]
@@ -2163,7 +2165,6 @@ class CompIntersection:
             ptsNew[j] = ptsNew[j] + interp
 
     def _warpSurfPts_b(self, dIdPt, pts0, indices, curvePtCoords):
-
         # seeds for delta
         deltaBar = np.zeros((dIdPt.shape[0], curvePtCoords.shape[0], 3))
 
@@ -2172,9 +2173,7 @@ class CompIntersection:
             return deltaBar
 
         for k in range(dIdPt.shape[0]):
-
             for j in indices:
-
                 # point coordinates with the baseline design
                 # this is the point we will warp
                 ptCoords = pts0[j]
@@ -2267,7 +2266,6 @@ class CompIntersection:
         return xyzProj
 
     def _projectToComponent_b(self, dIdpt, comp, projDict, surface=None):
-
         # We build an ADT for this component using pySurf
         # Set bounding box for new tree
         BBox = np.zeros((2, 3))
@@ -2400,7 +2398,6 @@ class CompIntersection:
 
         # Retrieve results from Fortran if we have an intersection
         if np.max(arraySizes[1:]) > 0:
-
             # Second Fortran call to retrieve data from the CGNS file.
             intersectionArrays = intersectionAPI.intersectionapi.retrievedata(*arraySizes)
 
@@ -2478,14 +2475,12 @@ class CompIntersection:
 
         # loop over the feature curves
         for curveName in self.featureCurveNames:
-
             # we need to initialize the dictionary here
             # to get the intermediate output from mindistancecurve call
             self.seamDict[curveName] = {}
 
             # if this curve is on compB, we use it to track intersection features
             if curveName in self.compB.barsConn and curveName not in self.remeshAll:
-
                 # get the curve connectivity
                 curveConn = self.compB.barsConn[curveName]
 
@@ -2644,7 +2639,6 @@ class CompIntersection:
 
         # we need to re-mesh feature curves if the user wants...
         if self.incCurves:
-
             # we need to set up some variables
             if firstCall:
                 self.nNodeFeature = {}
@@ -2655,7 +2649,6 @@ class CompIntersection:
 
             # loop over each curve, figure out what nodes get re-meshed, re-mesh, and append to seam...
             for curveName in self.featureCurveNames:
-
                 # figure out which comp owns this curve...
                 if curveName in self.compB.barsConn:
                     curveComp = self.compB
@@ -2875,7 +2868,6 @@ class CompIntersection:
 
         # check if we included feature curves
         if self.incCurves:
-
             # offset for the derivative seeds for this curve
             iBeg = 0
 
@@ -3001,7 +2993,6 @@ class CompIntersection:
                     curveProjb[curveName] = np.zeros((N, 3))
 
                     for ii in range(N):
-
                         # the only nonzero seed is indexed by argmin dist2
                         xyzProjb[np.argmin(dist2)] = projb[ii].copy()
 

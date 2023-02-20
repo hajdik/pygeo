@@ -19,11 +19,9 @@ inputDir = os.path.join(baseDir, "../../input_files")
 
 @unittest.skipIf(missing_pysurf, "requires pySurf")
 class TestDVGeoMulti(unittest.TestCase):
-
     N_PROCS = 1
 
     def test_boxes(self, train=False):
-
         # box1 and box2 intersect
         # box3 does not intersect anything
         comps = ["box1", "box2", "box3"]
@@ -151,14 +149,22 @@ class TestDVGeoMulti(unittest.TestCase):
         comm = MPI.COMM_WORLD
         DVGeo.addPointSet(pts, ptSetName, comm=comm, applyIC=True)
 
-        # Apply twist to the two intersecting boxes
-        dvDict = DVGeo.getValues()
-        dvDict["box1_twist"] = 2
-        dvDict["box2_twist"] = 2
-        DVGeo.setDesignVars(dvDict)
-
-        # Update the point set
-        ptsUpdated = DVGeo.update(ptSetName)
+        # Set up the complex and real DVGeoMulti objects
+        for DVGeo in [DVGeo_complex, DVGeo_real]:
+            # Add the intersection between box1 and box2
+            DVGeo.addIntersection(
+                "box1",
+                "box2",
+                dStarA=0.15,
+                dStarB=0.15,
+                featureCurves=featureCurves,
+                project=True,
+                includeCurves=True,
+                curveEpsDict=curveEpsDict,
+                trackSurfaces=trackSurfaces,
+                excludeSurfaces=excludeSurfaces,
+                anisotropy=[1.0, 1.0, 0.8],
+            )
 
         # Regression test the updated points
         refFile = os.path.join(baseDir, "ref/test_DVGeometryMulti.ref")
@@ -189,11 +195,12 @@ class TestDVGeoMulti(unittest.TestCase):
 
         for x in dvDict:
 
-            nx = len(dvDict[x])
+        for x in dvDict_real:
+            nx = len(dvDict_real[x])
             funcSensFD[x] = np.zeros((nx, nNodes * 3))
             for i in range(nx):
-
-                xRef = dvDict[x][i].copy()
+                xRef_real = dvDict_real[x][i].copy()
+                xRef_complex = dvDict_complex[x][i].copy()
 
                 # Compute the central difference
                 dvDict[x][i] = xRef + dh

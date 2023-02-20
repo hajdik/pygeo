@@ -5,7 +5,6 @@ from test_Blocks import add_vars
 
 
 class RegTestPyGeo(unittest.TestCase):
-
     N_PROCS = 1
 
     def make_cube_ffd(self, file_name, x0, y0, z0, dx, dy, dz):
