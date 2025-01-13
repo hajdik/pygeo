@@ -592,7 +592,7 @@ class DVGeometryESP(DVGeoSketch):
 
         return dMax_global
 
-    def setDesignVars(self, dvDict, updateJacobian=True):
+    def setDesignVars(self, dvDict, updateJacobian=True, updatePts=True):
         """
         Standard routine for setting design variables from a design variable dictionary.
 
@@ -618,7 +618,8 @@ class DVGeometryESP(DVGeoSketch):
             return built_successfully
 
         # update the projected coordinates
-        self._updateProjectedPts()
+        if updatePts:
+            self._updateProjectedPts()
 
         # We will also compute the jacobian so it is also up to date, provided we are asked for it
         if updateJacobian:
@@ -632,6 +633,7 @@ class DVGeometryESP(DVGeoSketch):
         if not updateJacobian:
             for ptName in self.pointSets:
                 self.updatedJac[ptName] = False
+
         return built_successfully
 
     def writeCADFile(self, filename):
@@ -942,6 +944,7 @@ class DVGeometryESP(DVGeoSketch):
             value = self._csmToFlat(csmDesPmtr.baseValue, rows, cols, numRow, numCol)
         else:
             # validate that it is of correct length
+            value = np.atleast_1d(value)
             if len(value) != len(rows) * len(cols):
                 raise Error(
                     "User-specified DV value does not match the dimensionality"
