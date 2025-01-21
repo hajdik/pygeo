@@ -118,6 +118,7 @@ class DVGeometryESP(DVGeoSketch):
         exclude_edge_projections=False,
         ulimits=None,
         vlimits=None,
+        isectPatch=False,
         name=None,
     ):
         if not ocsmImported:
@@ -147,6 +148,8 @@ class DVGeometryESP(DVGeoSketch):
         else:
             self.vlimits = np.array([-99999.0, 99999.0])
         self.debug = debug
+
+        self.isectPatch = isectPatch
 
         t1 = time.time()
         # read the model
@@ -590,6 +593,9 @@ class DVGeometryESP(DVGeoSketch):
                     tlimits=tlimitsg,
                 )
 
+        if self.isectPatch:
+            self.patchModel.processMesh(self.pointSets[ptName])
+
         return dMax_global
 
     def setDesignVars(self, dvDict, updateJacobian=True, updatePts=True):
@@ -998,6 +1004,9 @@ class DVGeometryESP(DVGeoSketch):
         for dvName in self.DVs:
             DV = self.DVs[dvName]
             print(f"{DV.csmDesPmtr:>30}{DV.name:>20}{DV.value:>20}")
+
+    def setPatch(self, model):
+        self.patchModel = model
 
     # # ----------------------------------------------------------------------
     # #        THE REMAINDER OF THE FUNCTIONS NEED NOT BE CALLED BY THE USER
