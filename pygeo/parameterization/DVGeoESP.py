@@ -598,7 +598,7 @@ class DVGeometryESP(DVGeoSketch):
 
         return dMax_global
 
-    def setDesignVars(self, dvDict, updateJacobian=True, updatePts=True):
+    def setDesignVars(self, dvDict, updateJacobian=True):
         """
         Standard routine for setting design variables from a design variable dictionary.
 
@@ -624,8 +624,7 @@ class DVGeometryESP(DVGeoSketch):
             return built_successfully
 
         # update the projected coordinates
-        if updatePts:
-            self._updateProjectedPts()
+        self._updateProjectedPts()
 
         # We will also compute the jacobian so it is also up to date, provided we are asked for it
         if updateJacobian:
@@ -1194,18 +1193,23 @@ class DVGeometryESP(DVGeoSketch):
         """
         for pointSetName in self.pointSets:
             pointSet = self.pointSets[pointSetName]
-            proj_pts = self._evaluatePoints(
-                pointSet.u,
-                pointSet.v,
-                pointSet.t,
-                pointSet.uvlimits0,
-                pointSet.tlimits0,
-                pointSet.bodyID,
-                pointSet.faceID,
-                pointSet.edgeID,
-                pointSet.nPts,
-            )
-            pointSet.proj_pts = proj_pts
+
+            if self.isectPatch:
+                proj_pts = self.patchModel.getPointset()
+                pointSet.proj_pts = proj_pts
+            else:
+                proj_pts = self._evaluatePoints(
+                    pointSet.u,
+                    pointSet.v,
+                    pointSet.t,
+                    pointSet.uvlimits0,
+                    pointSet.tlimits0,
+                    pointSet.bodyID,
+                    pointSet.faceID,
+                    pointSet.edgeID,
+                    pointSet.nPts,
+                )
+                pointSet.proj_pts = proj_pts
 
     def _allgatherCoordinates(self, ul, vl, tl, faceIDl, bodyIDl, edgeIDl, uvlimitsl, tlimitsl):
         # create the arrays to receive the global info
