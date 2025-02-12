@@ -410,7 +410,7 @@ class DVGeometryESP(DVGeoSketch):
 
                 # go through and check that each point projects
                 # within tolerance or else invalidate the cached values
-                proj_pts = self._evaluatePoints(ul, vl, tl, uvliml, tliml, bodyIDl, faceIDl, edgeIDl, nPts)
+                proj_pts = self._evaluatePoints(ul, vl, tl, uvliml, tliml, bodyIDl, faceIDl, edgeIDl, nPts, ptName)
                 if points.shape[0] == 0:
                     # empty pointset can occur for some distributed pointsets
                     dMax_local = 0.0
@@ -594,7 +594,7 @@ class DVGeometryESP(DVGeoSketch):
                 )
 
         if self.isectPatch:
-            self.patchModel.processMesh(self.pointSets[ptName])
+            self.patchModel.processMesh(self.pointSets[ptName], ptName)
 
         return dMax_global
 
@@ -1152,39 +1152,46 @@ class DVGeometryESP(DVGeoSketch):
             # built correctly
             return True
 
-    def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts):
+    def _evaluatePoints(self, u, v, t, uvlimits0, tlimits0, bodyID, faceID, edgeID, nPts, ptName=None):
         points = np.zeros((nPts, 3))
-        for ptidx in range(nPts):
-            # check if on an edge or surface
-            bid = bodyID[ptidx]
-            fid = faceID[ptidx]
-            eid = edgeID[ptidx]
 
-            if eid != -1:
-                # get the point from an edge
-                # get upper and lower parametric limits of updated model
-                tlim0 = tlimits0[ptidx]
-                tlim = self._getUVLimits(bid, ocsm.EDGE, eid)
-                trange0 = tlim0[1] - tlim0[0]
-                trange = tlim[1] - tlim[0]
-                tnew = (t[ptidx] - tlim0[0]) * trange / trange0 + tlim[0]
-                points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.EDGE, eid, 1, [tnew])
-            else:
-                # point from a face
-                if fid == -1:
-                    raise ValueError("both edge ID and face ID are unset")
-                # get the upper and lower uv limits of the updated model
-                uvlim0 = uvlimits0[ptidx]
-                uvlim = self._getUVLimits(bid, ocsm.FACE, fid)
-                urange0 = uvlim0[1] - uvlim0[0]
-                vrange0 = uvlim0[3] - uvlim0[2]
-                urange = uvlim[1] - uvlim[0]
-                vrange = uvlim[3] - uvlim[2]
-                # scale the input uv points according to the original uv limits
-                unew = (u[ptidx] - uvlim0[0]) * urange / urange0 + uvlim[0]
-                vnew = (v[ptidx] - uvlim0[2]) * vrange / vrange0 + uvlim[2]
-                points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.FACE, fid, 1, [unew, vnew])
+        if self.isectPatch:
+            points = self.patchModel.getPointset(ptName)
+
+        else:
+            for ptidx in range(nPts):
+                # check if on an edge or surface
+                bid = bodyID[ptidx]
+                fid = faceID[ptidx]
+                eid = edgeID[ptidx]
+
+                if eid != -1:
+                    # get the point from an edge
+                    # get upper and lower parametric limits of updated model
+                    tlim0 = tlimits0[ptidx]
+                    tlim = self._getUVLimits(bid, ocsm.EDGE, eid)
+                    trange0 = tlim0[1] - tlim0[0]
+                    trange = tlim[1] - tlim[0]
+                    tnew = (t[ptidx] - tlim0[0]) * trange / trange0 + tlim[0]
+                    points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.EDGE, eid, 1, [tnew])
+                else:
+                    # point from a face
+                    if fid == -1:
+                        raise ValueError("both edge ID and face ID are unset")
+                    # get the upper and lower uv limits of the updated model
+                    uvlim0 = uvlimits0[ptidx]
+                    uvlim = self._getUVLimits(bid, ocsm.FACE, fid)
+                    urange0 = uvlim0[1] - uvlim0[0]
+                    vrange0 = uvlim0[3] - uvlim0[2]
+                    urange = uvlim[1] - uvlim[0]
+                    vrange = uvlim[3] - uvlim[2]
+                    # scale the input uv points according to the original uv limits
+                    unew = (u[ptidx] - uvlim0[0]) * urange / urange0 + uvlim[0]
+                    vnew = (v[ptidx] - uvlim0[2]) * vrange / vrange0 + uvlim[2]
+                    points[ptidx, :] = self.espModel.GetXYZ(bid, ocsm.FACE, fid, 1, [unew, vnew])
+
         points = points * self.modelScale
+
         return points
 
     def _updateProjectedPts(self):
@@ -1194,22 +1201,19 @@ class DVGeometryESP(DVGeoSketch):
         for pointSetName in self.pointSets:
             pointSet = self.pointSets[pointSetName]
 
-            if self.isectPatch:
-                proj_pts = self.patchModel.getPointset()
-                pointSet.proj_pts = proj_pts
-            else:
-                proj_pts = self._evaluatePoints(
-                    pointSet.u,
-                    pointSet.v,
-                    pointSet.t,
-                    pointSet.uvlimits0,
-                    pointSet.tlimits0,
-                    pointSet.bodyID,
-                    pointSet.faceID,
-                    pointSet.edgeID,
-                    pointSet.nPts,
-                )
-                pointSet.proj_pts = proj_pts
+            proj_pts = self._evaluatePoints(
+                pointSet.u,
+                pointSet.v,
+                pointSet.t,
+                pointSet.uvlimits0,
+                pointSet.tlimits0,
+                pointSet.bodyID,
+                pointSet.faceID,
+                pointSet.edgeID,
+                pointSet.nPts,
+                pointSetName,
+            )
+            pointSet.proj_pts = proj_pts
 
     def _allgatherCoordinates(self, ul, vl, tl, faceIDl, bodyIDl, edgeIDl, uvlimitsl, tlimitsl):
         # create the arrays to receive the global info
@@ -1357,10 +1361,12 @@ class DVGeometryESP(DVGeoSketch):
                 n += 1
         if fd:
             # evaluate all the points
+            # print(f" _computeSurfJacobian {self.comm.rank} nptsg {nptsg}")
+            # print(f"computeSurfJac {self.comm.rank} {self.pointSets}")
             pts0 = self._evaluatePoints(ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg)
             # allocate the approriate sized numpy array for the perturbed points
             ptsNew = np.zeros((n, nptsg, 3))
-
+            # print(f"deriv {self.comm.rank}: {pts0}")
             # perturb the DVs on different procs and compute the new point coordinates.
             i = 0  # Counter on local Jac
 
@@ -1371,6 +1377,7 @@ class DVGeometryESP(DVGeoSketch):
                     dvName = self.globalDVList[iDV][0]
                     dvLocalIndex = self.globalDVList[iDV][1]
                     dvObj = self.DVs[dvName]
+
                     # Step size for this particular DV
                     dh = dvObj.dh
 
@@ -1385,13 +1392,14 @@ class DVGeometryESP(DVGeoSketch):
                     tesp += t12 - t11
 
                     t11 = time.time()
-                    # evaluate the points
 
+                    # evaluate the points
                     ptsNew[i, :, :] = self._evaluatePoints(
                         ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg
                     )
                     t12 = time.time()
                     teval += t12 - t11
+
                     # now we can calculate the jac and put it back in ptsNew
                     ptsNew[i, :, :] = (ptsNew[i, :, :] - pts0[:, :]) / dh
 
