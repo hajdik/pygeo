@@ -7,8 +7,10 @@ import time
 
 # External modules
 from baseclasses.utils import Error
+from pyspline.utils import openTecplot, writeTecplot1D, closeTecplot
 from mpi4py import MPI
 import numpy as np
+from scipy import sparse
 
 # Local modules
 from .DVGeoSketch import DVGeoSketch
@@ -139,6 +141,10 @@ class DVGeometryESP(DVGeoSketch):
         self.suppress_stdout = suppress_stdout
         self.exclude_edge_projections = exclude_edge_projections
 
+        # Jacobians:
+        self.JT = {}
+        self.nPts = {}
+
         if ulimits is not None:
             self.ulimits = ulimits
         else:
@@ -170,7 +176,7 @@ class DVGeometryESP(DVGeoSketch):
 
         t2 = time.time()
         if self.comm.rank == 0:
-            print("Loading the esp model took:", (t2 - t1))
+            print(f"Loading the esp model {self.fileName} took: {t2 - t1}")
 
         # List of all bodies returned from ESP
         if not bodies:
@@ -262,7 +268,11 @@ class DVGeometryESP(DVGeoSketch):
         # save this name so that we can zero out the jacobians properly
         self.ptSetNames.append(ptName)
         self.points[ptName] = True  # ADFlow checks self.points to see if something is added or not
+        self.zeroJacobians([ptName])
+        self.nPts[ptName] = None
+
         points = np.array(points).real.astype("d")
+        self.points[ptName] = points
 
         # check that duplicated pointsets are actually the same length
         sizes = np.array(self.comm.allgather(points.shape[0]), dtype="intc")
@@ -464,9 +474,11 @@ class DVGeometryESP(DVGeoSketch):
             uvlimits_best = None
             tlimits_best = None
             t_best = -1
+
             for bodyIndex in self.bodyIndices:
                 nEdges = self.espModel.GetBody(bodyIndex)[6]
                 nFaces = self.espModel.GetBody(bodyIndex)[7]
+
                 if not self.exclude_edge_projections:
                     for edgeIndex in range(1, nEdges + 1):
                         # try to match point on edges first
@@ -475,9 +487,11 @@ class DVGeometryESP(DVGeoSketch):
                             ttemp = self.espModel.GetUV(bodyIndex, ocsm.EDGE, edgeIndex, 1, truexyz.tolist())
                             # get the xyz location of the newly projected point
                             xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, ocsm.EDGE, edgeIndex, 1, ttemp))
+
                         dist_temp = np.sum((truexyz - xyztemp) ** 2)
                         ttemp = ttemp[0]
                         tlimits = self._getUVLimits(bodyIndex, ocsm.EDGE, edgeIndex)
+
                         if not (ttemp < tlimits[0] - rejectuvtol or ttemp > tlimits[1] + rejectuvtol):
                             if dist_temp < dist_best:
                                 tlimits_best = tlimits
@@ -493,11 +507,13 @@ class DVGeometryESP(DVGeoSketch):
                         uvtemp = self.espModel.GetUV(bodyIndex, ocsm.FACE, faceIndex, 1, truexyz.tolist())
                         # get the XYZ location of the newly projected points
                         xyztemp = np.array(self.espModel.GetXYZ(bodyIndex, ocsm.FACE, faceIndex, 1, uvtemp))
+
                     dist_temp = np.sum((truexyz - xyztemp) ** 2)
                     # validate u and v
                     utemp = uvtemp[0]
                     vtemp = uvtemp[1]
                     uvlimits = self._getUVLimits(bodyIndex, ocsm.FACE, faceIndex)
+
                     if not (
                         utemp < uvlimits[0] - rejectuvtol
                         or utemp > uvlimits[1] + rejectuvtol
@@ -521,21 +537,32 @@ class DVGeometryESP(DVGeoSketch):
                                 tlimits_best = None
                                 dist_best = dist_temp
                                 xyzbest = xyztemp.copy()
+
             if dist_best == 99999999999:
                 # all projections failed: this shouldn't occur unless the uv limits are set too tight
                 raise ValueError("All projections failed for this point. Check ulimits and vlimits")
+
+            # store the face, edge, and body in the ESP model that correspond to this point
             faceIDArray[ptidx] = fi_best
             edgeIDArray[ptidx] = ei_best
             bodyIDArray[ptidx] = bi_best
+
+            # record our u, v, and t limits for this point
             uvlimArray[ptidx, :] = np.array(uvlimits_best)
             tlimArray[ptidx, :] = np.array(tlimits_best)
+
+            # store the parametric (u, v, and t) coordinates for this point
             uv[ptidx, 0] = uv_best[0]
             uv[ptidx, 1] = uv_best[1]
             t[ptidx] = t_best
+
             dists[ptidx] = dist_best
             proj_pts_esp[ptidx, :] = xyzbest
 
+        # scale our projected points by the given model scale
         proj_pts = proj_pts_esp * self.modelScale
+
+        # find the max distance between the pointset and the ESP geometry
         if points.shape[0] != 0:
             dMax = np.max(np.sqrt(np.sum((points - proj_pts) ** 2, axis=1)))
         else:
@@ -545,10 +572,13 @@ class DVGeometryESP(DVGeoSketch):
         t2 = time.time()
 
         if self.comm.rank == 0 or self.comm is None:
-            print("Adding pointset", ptName, "took", t2 - t1, "seconds.")
-            print("Maximum distance between the added points and the ESP geometry is", dMax_global)
+            print(f"Adding pointset {ptName} took {t2 - t1} seconds.")
+            print(
+                f"Maximum distance between the added points in {ptName} and the ESP geometry {self.fileName} is {dMax_global}"
+            )
         if dMax_global > self.projTol:
-            raise ValueError("Pointset projection error exceeded tolerance")
+            raise ValueError(f"Pointset {ptName} projection error {dMax_global} exceeded tolerance {self.projTol}")
+
         # Create the little class with the data
         self.pointSets[ptName] = PointSet(
             points, proj_pts, bodyIDArray, faceIDArray, edgeIDArray, uv, t, uvlimArray, tlimArray, distributed
@@ -557,6 +587,7 @@ class DVGeometryESP(DVGeoSketch):
         # Set the updated flag to false because the jacobian is not up to date.
         self.updated[ptName] = False
         self.updatedJac[ptName] = False
+        # TODO also zero JT here?
 
         if cache_projections and not cache_loaded:
             # get the global projections and save in compressed npz format
@@ -576,6 +607,7 @@ class DVGeometryESP(DVGeoSketch):
                 uvlimitsg = uvlimArray
                 tlimitsg = tlimArray
                 sizes = np.array([len(ug)])
+
             if self.comm.rank == 0:
                 np.savez_compressed(
                     cache_projections,
@@ -686,8 +718,8 @@ class DVGeometryESP(DVGeoSketch):
             # get the offset between points and original projected points
             offset = self.pointSets[ptSetName].offset
 
-            # Get the coordinates of new surface cfd points, use the same array, BUT this should
-            # actually be called newPoints since it has cfd nodes now
+            # Get the coordinates of new surface mesh points, use the same array, BUT this should
+            # actually be called newPoints since it has mesh nodes now
             newPts -= offset
 
             # Now compute the delta between the nominal new points and the
@@ -757,18 +789,21 @@ class DVGeometryESP(DVGeoSketch):
         if self.pointSets[ptSetName].jac is None:
             # in this case, we updated our pts when we added our pointset,
             # therefore the reference pts are up to date.
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # if the jacobian for this pointset is not up to date
         # update all the points
         if not self.updatedJac[ptSetName]:
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # Make dIdpt at least 3D
         if len(dIdpt.shape) == 2:
             dIdpt = np.array([dIdpt])
         N = dIdpt.shape[0]
         nPt = dIdpt.shape[1]
+
+        # generate the total Jacobian self.JT
+        self.computeTotalJacobian(ptSetName, config=config)
 
         # The following code computes the final sensitivity product:
         #
@@ -777,7 +812,7 @@ class DVGeometryESP(DVGeoSketch):
         #  ------  ------
         #   pXdv    pXpt
         #
-        # Where I is the objective, Xpt are the externally coordinates
+        # Where I is the objective, Xpt are the external coordinates
         # supplied in addPointSet
 
         # Extract just the single dIdpt we are working with. Make
@@ -786,15 +821,10 @@ class DVGeometryESP(DVGeoSketch):
         # reshape the dIdpt array from [N] * [nPt] * [3] to  [N] * [nPt*3]
         dIdpt = dIdpt.reshape((N, nPt * 3))
 
-        # # transpose dIdpt and vstack;
-        # # Now vstack the result with seamBar as that is far as the
-        # # forward FD jacobian went.
-        tmp = dIdpt.T
-
         # we also stack the pointset jacobian
         jac = self.pointSets[ptSetName].jac.copy()
 
-        dIdxT_local = jac.T.dot(tmp)
+        dIdxT_local = jac.T.dot(dIdpt.T)
         dIdx_local = dIdxT_local.T
 
         if comm:
@@ -807,12 +837,13 @@ class DVGeometryESP(DVGeoSketch):
             dIdxDict = self.convertSensitivityToDict(dIdx, useCompositeNames=True)
 
         else:
-            # Now convert to dict:
+            # Now convert to dict: TODO this could just be convertSensitivityToDict()
             dIdxDict = {}
             for dvName in self.DVs:
                 dv = self.DVs[dvName]
                 jac_start = dv.globalStartInd
                 jac_end = jac_start + dv.nVal
+                # dIdxDict[dvName] = np.array([dIdx[:, i]]).T # TODO see if this is needed
                 dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
 
         return dIdxDict
@@ -842,12 +873,14 @@ class DVGeometryESP(DVGeoSketch):
         if self.pointSets[ptSetName].jac is None:
             # in this case, we updated our pts when we added our pointset,
             # therefore the reference pts are up to date.
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
 
         # if the jacobian for this pointset is not up to date
         # update all the points
         if not self.updatedJac[ptSetName]:
-            self._computeSurfJacobian()
+            self._computeSurfJacobian(ptSetName)
+
+        self.computeTotalJacobian(ptSetName, config=config)  # This updates self.JT
 
         # vector that has all the derivative seeds of the design vars
         newvec = np.zeros(self.getNDV())
@@ -944,6 +977,7 @@ class DVGeometryESP(DVGeoSketch):
             rows = range(1, numRow + 1)
         if cols is None:
             cols = range(1, numCol + 1)
+
         # if value is None, get the current value from ESP
         if value is None:
             value = self._csmToFlat(csmDesPmtr.baseValue, rows, cols, numRow, numCol)
@@ -993,6 +1027,126 @@ class DVGeometryESP(DVGeoSketch):
 
         self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
 
+    def computeTotalJacobian(self, ptSetName, config=None):
+        if self.JT[ptSetName] is not None:
+            return
+
+        if not self.updatedJac[ptSetName]:
+            self._computeSurfJacobian()
+
+        jac = np.array(self.pointSets[ptSetName].jac, dtype="float64")
+        jac_T = jac.T
+        jacT_csr = sparse.coo_matrix(jac_T).tocsr()
+
+        self.JT[ptSetName] = jacT_csr
+        self.JT[ptSetName].has_sorted_indices = False
+        self.JT[ptSetName].sort_indices()
+
+    def zeroJacobians(self, ptSetNames):
+        """
+        set stored jacobians to None for ptSetNames
+
+        Parameters
+        ----------
+        ptSetNames : list
+            list of ptSetNames to zero the jacobians.
+        """
+        for name in ptSetNames:
+            self.JT[name] = None  # JT is no longer up to date
+
+    def getValues(self):
+        """
+        Generic routine to return the current set of design
+        variables. Values are returned in a dictionary format
+        that would be suitable for a subsequent call to :func:`setDesignVars`
+
+        Returns
+        -------
+        dvDict : dict
+            Dictionary of design variables
+        """
+
+        dvDict = {}
+
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
+            dvDict[dvName] = dv.value
+
+        return dvDict
+
+    def convertSensitivityToDict(self, dIdx, out1D=False, useCompositeNames=False):
+        """
+        This function takes the result of totalSensitivity and converts it to a dict for use in pyOptSparse.
+
+        Parameters
+        ----------
+        dIdx : array
+           Flattened array of length getNDV(). Generally it comes from
+           a call to totalSensitivity()
+
+        out1D : boolean
+            If true, creates a 1D array in the dictionary instead of 2D.
+            This function is used in the matrix-vector product calculation.
+
+        useCompositeNames : boolean
+            Composite DVs are not used by DVGeoESP
+
+        Returns
+        -------
+        dIdxDict : dictionary
+           Dictionary of the same information keyed by this object's design variables
+        """
+
+        dIdxDict = {}
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
+            jac_start = dv.globalStartInd
+            jac_end = jac_start + dv.nVal
+            dIdxDict[dvName] = dIdx[:, jac_start:jac_end]
+
+        return dIdxDict
+
+    def convertDictToSensitivity(self, dIdxDict):
+        """
+        This function performs the reverse operation of convertSensitivityToDict(); it transforms the dictionary back into an array.
+        This function is important for the matrix-free interface.
+
+        Parameters
+        ----------
+        dIdxDict : dictionary
+           Dictionary of information keyed by this object's design variables
+
+        Returns
+        -------
+        dIdx : array
+           Flattened array of length getNDV().
+        """
+        DVCount = self.getNDV()  # DVGeoESP only has one type of DV
+        dIdx = np.zeros(DVCount, "d")  # DVGeoESP object will never be complex
+
+        i = 0
+        for dvName in self.DVs:
+            dv = self.DVs[dvName]
+            dIdx[i : i + dv.nVal] = dIdxDict[dv.name]
+            i += dv.nVal
+
+        return dIdx
+
+    def getVarNames(self, pyOptSparse=False):
+        """
+        Return a list of the design variable names.
+        This is typically used when specifying a wrt= argument for pyOptSparse.
+
+        Examples
+        --------
+        optProb.addCon(.....wrt=DVGeo.getVarNames())
+        """
+        names = []
+        for i in range(self.getNDV()):
+            names.append(self.globalDVList[i][0])
+
+        return names
+
     def printDesignVariables(self):
         """
         Print a formatted list of design variables to the screen
@@ -1003,6 +1157,25 @@ class DVGeometryESP(DVGeoSketch):
         for dvName in self.DVs:
             DV = self.DVs[dvName]
             print(f"{DV.csmDesPmtr:>30}{DV.name:>20}{DV.value:>20}")
+
+    def writePointSet(self, name, fileName):
+        """
+        Write a given point set to a tecplot file
+
+        Parameters
+        ----------
+        name : str
+             The name of the point set to write to a file
+
+        fileName : str
+           Filename for tecplot file. Should have no extension, an
+           extension will be added
+        """
+        coords = self.update(name)
+        fileName = fileName + "_%s.dat" % name
+        f = openTecplot(fileName, 3)
+        writeTecplot1D(f, name, coords)
+        closeTecplot(f)
 
     def setPatch(self, model):
         self.patchModel = model
@@ -1286,6 +1459,8 @@ class DVGeometryESP(DVGeoSketch):
                 nproc = self.comm.size
         rank = self.comm.rank
 
+        ptSetNames = list(self.pointSets.keys())
+
         # arrays to collect local pointset info
         ul = np.zeros(0)  # local u coordinates
         vl = np.zeros(0)  # local v coordinates
@@ -1297,9 +1472,11 @@ class DVGeometryESP(DVGeoSketch):
         tlimitsl = np.zeros((0, 2))
         any_ptset_nondistributed = False
         any_ptset_distributed = False
+
         for ptSetName in self.pointSets:
             # initialize the Jacobians
             self.pointSets[ptSetName].jac = np.zeros((3 * self.pointSets[ptSetName].nPts, nDV))
+
             if self.pointSets[ptSetName].distributed:
                 any_ptset_distributed = True
             else:
@@ -1315,6 +1492,7 @@ class DVGeometryESP(DVGeoSketch):
             edgeIDl = np.concatenate((edgeIDl, self.pointSets[ptSetName].edgeID))
             uvlimitsl = np.concatenate((uvlimitsl, self.pointSets[ptSetName].uvlimits0))
             tlimitsl = np.concatenate((tlimitsl, self.pointSets[ptSetName].tlimits0))
+
         if any_ptset_distributed and any_ptset_nondistributed:
             raise ValueError(
                 "Both nondistributed and distributed pointsets were added to this DVGeoESP which is not yet supported"
@@ -1343,9 +1521,10 @@ class DVGeometryESP(DVGeoSketch):
             edgeIDg = edgeIDl
             uvlimitsg = uvlimitsl
             tlimitsg = tlimitsl
-        # create a local new point array. We will use this to get the new
-        # coordinates as we perturb DVs. We just need one (instead of nDV times the size)
-        # because we get the new points, calculate the jacobian and save it right after
+
+        # create a local new point array.
+        # We will use this to get the new coordinates as we perturb DVs.
+        # We just need one (instead of nDV times the size) because we get the new points, calculate the jacobian and save it right after
         ptsNewL = np.zeros(len(ul) * 3)
 
         # we now have all the point info on all procs.
@@ -1354,24 +1533,23 @@ class DVGeometryESP(DVGeoSketch):
         # We need to evaluate all the points on respective procs for FD computations
 
         # determine how many DVs this proc will perturb.
-        n = 0
+        proc_nDV = 0
         for iDV in range(self.getNDV()):
             # I have to do this one.
             if iDV % nproc == rank:
-                n += 1
+                proc_nDV += 1
         if fd:
             # evaluate all the points
-            # print(f" _computeSurfJacobian {self.comm.rank} nptsg {nptsg}")
-            # print(f"computeSurfJac {self.comm.rank} {self.pointSets}")
-            pts0 = self._evaluatePoints(ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg)
+            pts0 = self._evaluatePoints(ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg, ptSetNames)
+
             # allocate the approriate sized numpy array for the perturbed points
-            ptsNew = np.zeros((n, nptsg, 3))
-            # print(f"deriv {self.comm.rank}: {pts0}")
+            ptsNew = np.zeros((proc_nDV, nptsg, 3))
+
             # perturb the DVs on different procs and compute the new point coordinates.
             i = 0  # Counter on local Jac
 
-            for iDV in range(self.getNDV()):
-                # I have to do this one.
+            for iDV in range(nDV):
+                # determine if the current proc is assigned to perturb this DV
                 if iDV % nproc == rank:
                     # Get the DV object for this variable
                     dvName = self.globalDVList[iDV][0]
@@ -1395,8 +1573,9 @@ class DVGeometryESP(DVGeoSketch):
 
                     # evaluate the points
                     ptsNew[i, :, :] = self._evaluatePoints(
-                        ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg
+                        ug, vg, tg, uvlimitsg, tlimitsg, bodyIDg, faceIDg, edgeIDg, nptsg, ptSetNames
                     )
+
                     t12 = time.time()
                     teval += t12 - t11
 
@@ -1422,7 +1601,7 @@ class DVGeometryESP(DVGeoSketch):
 
         ii = 0
         # loop over the DVs and scatter the perturbed points to original procs
-        for iDV in range(self.getNDV()):
+        for iDV in range(nDV):
             # Get the DV object for this variable
             dvName = self.globalDVList[iDV][0]
             dvLocalIndex = self.globalDVList[iDV][1]
@@ -1438,7 +1617,9 @@ class DVGeometryESP(DVGeoSketch):
                     sendbuf = [ptsNew[ii, :, :].flatten(), sizes * 3, disp * 3, MPI.DOUBLE]
                 else:
                     sendbuf = [np.zeros((0, 3)), sizes * 3, disp * 3, MPI.DOUBLE]
+
                 recvbuf = [ptsNewL, MPI.DOUBLE]
+
                 # scatter the info from the proc that perturbed this DV to all procs
                 self.comm.Scatterv(sendbuf, recvbuf, root=root_proc)
             else:
@@ -1448,6 +1629,7 @@ class DVGeometryESP(DVGeoSketch):
                     ptsNewL[:] = ptsNew[ii, :, :].flatten()
                 else:
                     bcastbuf = [ptsNewL, MPI.DOUBLE]
+
                 # bcast the info from the proc that perturbed this DV to all procs
                 self.comm.Bcast(bcastbuf, root=root_proc)
                 self.comm.Barrier()
@@ -1478,10 +1660,10 @@ class DVGeometryESP(DVGeoSketch):
 
         t2 = time.time()
         if rank == 0:
-            print("FD jacobian calcs with DVGeoESP took", (t2 - t1), "seconds in total")
-            print("updating the esp model took", tesp, "seconds")
-            print("evaluating the new points took", teval, "seconds")
-            print("communication took", tcomm, "seconds")
+            print(f"FD jacobian calcs with DVGeoESP took {t2 - t1} seconds in total for {self.fileName}")
+            print(f"updating the ESP model took {tesp} seconds")
+            print(f"evaluating the new points took {teval} seconds")
+            print(f"communication took {tcomm} seconds")
 
         # set the update flags
         for ptSet in self.pointSets:
