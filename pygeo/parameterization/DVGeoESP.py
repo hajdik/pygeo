@@ -1329,7 +1329,7 @@ class DVGeometryESP(DVGeoSketch):
         points = np.zeros((nPts, 3))
 
         if self.isectPatch:
-            points = self.patchModel.getPointset(ptName)
+            points = self.patchModel.update(ptName)
 
         else:
             for ptidx in range(nPts):
