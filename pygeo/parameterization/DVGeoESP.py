@@ -122,7 +122,9 @@ class DVGeometryESP(DVGeoSketch):
         vlimits=None,
         isectPatch=False,
         name=None,
+        outputDir=None,
     ):
+        self.outputDir = outputDir
         if not ocsmImported:
             raise ImportError("OCSM and pyOCSM must be installed to use DVGeometryESP.")
         if comm.rank == 0:
@@ -785,16 +787,16 @@ class DVGeometryESP(DVGeoSketch):
             The dictionary containing the derivatives, suitable for pyOptSparse.
         """
 
-        # We may not have set the variables so the surf jac might not be computed.
-        if self.pointSets[ptSetName].jac is None:
-            # in this case, we updated our pts when we added our pointset,
-            # therefore the reference pts are up to date.
-            self._computeSurfJacobian(ptSetName)
+        # # We may not have set the variables so the surf jac might not be computed.
+        # if self.pointSets[ptSetName].jac is None:
+        #     # in this case, we updated our pts when we added our pointset,
+        #     # therefore the reference pts are up to date.
+        #     self._computeSurfJacobian(ptSetName)
 
-        # if the jacobian for this pointset is not up to date
-        # update all the points
-        if not self.updatedJac[ptSetName]:
-            self._computeSurfJacobian(ptSetName)
+        # # if the jacobian for this pointset is not up to date
+        # # update all the points
+        # if not self.updatedJac[ptSetName]:
+        #     self._computeSurfJacobian(ptSetName)
 
         # Make dIdpt at least 3D
         if len(dIdpt.shape) == 2:
@@ -819,13 +821,14 @@ class DVGeometryESP(DVGeoSketch):
         # a copy because we may need to modify it.
 
         # reshape the dIdpt array from [N] * [nPt] * [3] to  [N] * [nPt*3]
-        dIdpt = dIdpt.reshape((N, nPt * 3))
+        # dIdpt = dIdpt.reshape((N, nPt * 3))
 
-        # we also stack the pointset jacobian
-        jac = self.pointSets[ptSetName].jac.copy()
-
-        dIdxT_local = jac.T.dot(dIdpt.T)
-        dIdx_local = dIdxT_local.T
+        # now that we have self.JT compute the Mat-Mat multiplication
+        nDV = self._getNDV()
+        dIdx_local = np.zeros((N, nDV), "d")
+        for i in range(N):
+            if self.JT[ptSetName] is not None:
+                dIdx_local[i, :] = self.JT[ptSetName].dot(dIdpt[i, :, :].flatten())
 
         if comm:
             dIdx = comm.allreduce(dIdx_local, op=MPI.SUM)
@@ -1028,8 +1031,8 @@ class DVGeometryESP(DVGeoSketch):
         self.DVs[dvName] = espDV(csmDesPmtr, dvName, value, lower, upper, scale, rows, cols, dh, globalStartInd)
 
     def computeTotalJacobian(self, ptSetName, config=None):
-        if self.JT[ptSetName] is not None:
-            return
+        # if self.JT[ptSetName] is not None:
+        #     return
 
         if not self.updatedJac[ptSetName]:
             self._computeSurfJacobian()
