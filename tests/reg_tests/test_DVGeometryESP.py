@@ -38,7 +38,8 @@ if mpiInstalled:
 test_params = [{"N_PROCS": 1, "name": "serial"}, {"N_PROCS": 4, "name": "parallel_4procs"}]
 
 
-def manualTestFD(DVGeo, pts, ptSetName):
+def manualTestFD(DVGeo, ptSetName):
+    pts = DVGeo.pointSets[ptSetName]
     nNodes = pts.shape[0]
     dIdpt = np.zeros((nNodes * 3, nNodes, 3))
 
@@ -80,6 +81,46 @@ def manualTestFD(DVGeo, pts, ptSetName):
     return funcSens, funcSensFD
 
 
+def createDVGeo(inputPath, geo, isectPatch=False):
+    csmFile = os.path.join(inputPath, f"../input_files/esp/{geo}.csm")
+    DVGeo = DVGeometryESP(csmFile, isectPatch=isectPatch)
+
+    if isectPatch:
+        nCP = 6
+        k = 3
+        res = 15
+
+        if geo == "box":
+            faceEdgeMap = {
+                1: [1, 2, 3, 4],
+                2: [5, 6, 7, 8],
+                3: [1, 5, 9, 10],
+                4: [3, 7, 11, 12],
+                5: [4, 8, 9, 12],
+                6: [2, 6, 10, 12],
+            }
+
+        elif geo == "planes":
+            faceEdgeMap = {
+                1: [2, 3, 4, 1],
+                2: [6, 7, 2, 5],
+                3: [2, 8, 9, 10],
+                4: [2, 11, 12, 13],
+            }
+
+        model = PatchModel(
+            DVGeo,
+            nCP,
+            k,
+            res,
+            debug=False,
+        )
+        model.setUpESP(faceEdgeMap)
+        DVGeo.setPatch(model)
+
+    return DVGeo
+
+
 @unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
 @parameterized_class(test_params)
 class TestPyGeoESP_BasicCube(unittest.TestCase):
@@ -94,8 +135,7 @@ class TestPyGeoESP_BasicCube(unittest.TestCase):
 
     def setup_cubemodel(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
         self.assertIsNotNone(DVGeo)
 
         # add a point set on the surface
@@ -175,8 +215,7 @@ class TestPyGeoESP_BasicCube(unittest.TestCase):
 
     def test_load_a_model(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
 
     def test_save_cadfile(self):
         write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".step")
@@ -213,8 +252,7 @@ class TestPyGeoESP_BasicCube(unittest.TestCase):
 
     def test_add_desvars(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
         self.assertIsNotNone(DVGeo)
 
         # add variables with a mix of optional arguments
@@ -317,8 +355,7 @@ class TestPyGeoESP_BasicCube(unittest.TestCase):
 
         refFile = os.path.join(self.input_path, "reg_tests/ref/test_DVGeometryESP_02.ref")
 
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
         self.assertIsNotNone(DVGeo)
 
         # add variables with a mix of optional arguments
@@ -442,8 +479,7 @@ class TestPyGeoESP_BasicCube_Distributed(unittest.TestCase):
 
     def setup_cubemodel(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
         self.assertIsNotNone(DVGeo)
 
         # add a point set on the surface
@@ -536,13 +572,11 @@ class TestPyGeoESP_BasicCube_Distributed(unittest.TestCase):
 
     def test_load_a_model(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
 
     def test_add_desvars(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
         self.assertIsNotNone(DVGeo)
 
         # add variables with a mix of optional arguments
@@ -628,287 +662,6 @@ class TestPyGeoESP_BasicCube_Distributed(unittest.TestCase):
 
 
 @unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
-@parameterized_class(test_params)
-class TestPyGeoESP_BasicCube_Patch(unittest.TestCase):
-    # to be tested in serial and parallel automatically
-    N_PROCS = 1
-
-    def setUp(self):
-        # Store the path where this current script lives
-        # This all paths in the script are relative to this path
-        # This is needed to support testflo running directories and files as inputs
-        self.input_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    def setup_cubemodel(self):
-        # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile, isectPatch=True)
-
-        nCP = 6
-        k = 3
-        res = 15
-
-        faceEdgeMap = {
-            1: [1, 2, 3, 4],
-            2: [5, 6, 7, 8],
-            3: [1, 5, 9, 10],
-            4: [3, 7, 11, 12],
-            5: [4, 8, 9, 12],
-            6: [2, 6, 10, 12],
-        }
-        self.output = os.path.join(os.path.dirname(__file__), "testpatch")
-        os.makedirs(self.output, exist_ok=True)
-        self.model = PatchModel(DVGeo, nCP, k, res, debug=False, debugDir=self.output)
-        self.model.setUpESP(faceEdgeMap)
-        DVGeo.setPatch(self.model)
-
-        self.assertIsNotNone(DVGeo)
-
-        # add a point set on the surface
-        vertex1 = np.array([-2.0, -2.0, -2.0])
-        vertex2 = np.array([1.5, 1.5, 1.5])
-        left = np.array([-2.0, -1.1, -1.1])
-        right = np.array([1.5, -1.2, -0.1])
-        front = np.array([0.25, 1.5, 0.3])
-        back = np.array([1.2, -2.0, -0.3])
-        top = np.array([0.0, 0.1, 1.5])
-        bottom = np.array([-1.9, -1.1, -2.0])
-        initpts = np.vstack([vertex1, vertex2, left, right, front, back, top, bottom, left, right])
-        distglobal = DVGeo.addPointSet(initpts, "mypts", cache_projections=False, distributed=False)
-        self.assertAlmostEqual(distglobal, 0.0, 8)
-
-        # evaluate the points and check that they match
-        DVGeo._updateModel()
-        DVGeo._updateProjectedPts()
-        self.assertTrue(DVGeo.pointSetUpToDate)
-        self.assertAlmostEqual(np.linalg.norm(initpts - DVGeo.pointSets["mypts"].proj_pts), 0.0, 10)
-
-        return DVGeo, initpts
-
-    def test_load_a_model(self):
-        # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeometryESP(csmFile)
-
-    def test_save_cadfile(self):
-        write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".step")
-        DVGeo, initpts = self.setup_cubemodel()
-        if DVGeo.comm.rank == 0:
-            try:
-                os.remove(write_fullpath)
-            except OSError:
-                pass
-        DVGeo.writeCADFile(write_fullpath)
-        DVGeo.comm.barrier()
-        time.sleep(0.1)
-        self.assertTrue(os.path.exists(write_fullpath))
-
-        # check that bad file extension raises a Python error
-        with self.assertRaises(IOError):
-            DVGeo.writeCADFile("relpath.wrongext")
-
-    def test_write_csmfile(self):
-        DVGeo, initpts = self.setup_cubemodel()
-        write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".csm")
-        if DVGeo.comm.rank == 0:
-            try:
-                os.remove(write_fullpath)
-            except OSError:
-                pass
-        DVGeo.writeCSMFile(write_fullpath)
-        DVGeo.comm.barrier()
-        time.sleep(0.1)
-        self.assertTrue(os.path.exists(write_fullpath))
-        # check that bad file extension raises a Python error
-        with self.assertRaises(IOError):
-            DVGeo.writeCADFile("relpath.wrongext")
-
-    def test_add_desvars(self):
-        # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
-        self.assertIsNotNone(DVGeo)
-
-        # add variables with a mix of optional arguments
-        DVGeo.addVariable("cubex0", lower=np.array([-10.0]), upper=np.array([10.0]), scale=0.1, dh=0.0001)
-        self.assertEqual(DVGeo.getNDV(), 1)
-        DVGeo.addVariable("cubey0")
-        self.assertEqual(DVGeo.getNDV(), 2)
-        DVGeo.addVariable("cubez0", lower=np.array([-10.0]), upper=np.array([10.0]))
-        self.assertEqual(DVGeo.getNDV(), 3)
-
-        # try to add a variable that isn't in the CSM file
-        with self.assertRaises(Error):
-            DVGeo.addVariable("cubew0")
-
-    def test_add_pointset(self):
-        DVGeo, initpts = self.setup_cubemodel()
-
-    def test_updated_points(self):
-        DVGeo, initpts = self.setup_cubemodel()
-
-        for i, patch in enumerate(self.model.patches):
-            patch.writeTecplot(f"{self.output}/surfOrig_{i+1}.dat")
-
-        DVGeo.addVariable("cubey0")
-        DVGeo.setDesignVars({"cubey0": np.array([4.2000])}, updateJacobian=False)
-
-        for i, patch in enumerate(self.model.patches):
-            patch.writeTecplot(f"{self.output}/surfUpd1_{i+1}.dat")
-
-        npts = initpts.shape[0]
-        self.assertAlmostEqual(np.sum(DVGeo.pointSets["mypts"].proj_pts[:, 1] - initpts[:, 1]) / npts, 6.2, 10)
-        DVGeo.addVariable("cubedz")
-        DVGeo.setDesignVars({"cubedz": np.array([9.5])}, updateJacobian=False)
-
-        for i, patch in enumerate(self.model.patches):
-            patch.writeTecplot(f"{self.output}/surfUpd2_{i+1}.dat")
-
-        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2], 7.5)
-        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 2], -2.0)
-
-    def test_finite_precision(self):
-        DVGeo, initpts = self.setup_cubemodel()
-
-        DVGeo.addVariable("cubey0")
-        DVGeo.setDesignVars({"cubey0": np.array([4.2 + 1e-12])}, updateJacobian=False)
-        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 1] - 4.2, 1e-12, 15)
-        DVGeo.addVariable("cubedz")
-        DVGeo.setDesignVars({"cubedz": np.array([9.5 - 1e-12])}, updateJacobian=False)
-        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2] - 7.5, -1e-12, 15)
-
-    def testFullFD(self):
-        DVGeo, pts = self.setup_cubemodel()
-        ptSetName = "mypts"
-
-        funcSens, funcSensFD = manualTestFD(DVGeo, pts, ptSetName)
-
-        for x in DVGeo.getValues():
-            if self.comm.rank == 0:
-                print(f"{x} sum: {np.sum(funcSens[x])}")
-
-            else:
-                np.testing.assert_allclose(funcSens[x].T, funcSensFD[x], rtol=1e-3, atol=1e-5)
-
-
-@unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
-class TestPyGeoESP_BasicCube_Patch_Distributed(unittest.TestCase):
-    N_PROCS = 3
-
-    def setUp(self):
-        # Store the path where this current script lives
-        # This all paths in the script are relative to this path
-        # This is needed to support testflo running directories and files as inputs
-        self.input_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.comm = MPI.COMM_WORLD
-
-    def setup_cubemodel(self):
-        # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
-
-        nCP = 6
-        k = 3
-        res = 15
-
-        faceEdgeMap = {
-            1: [1, 2, 3, 4],
-            2: [5, 6, 7, 8],
-            3: [1, 5, 9, 10],
-            4: [3, 7, 11, 12],
-            5: [4, 8, 9, 12],
-            6: [2, 6, 10, 12],
-        }
-        self.model = PatchModel(DVGeo, nCP, k, res, debug=False)
-        self.model.setUpESP(faceEdgeMap)
-
-        self.assertIsNotNone(DVGeo)
-
-        # add a point set on the surface
-        # distri
-        vertex1 = np.array([-2.0, -2.0, -2.0])
-        vertex2 = np.array([1.5, 1.5, 1.5])
-        left = np.array([-2.0, -1.1, -1.1])
-        right = np.array([1.5, -1.2, -0.1])
-        front = np.array([0.25, 1.5, 0.3])
-        back = np.array([1.2, -2.0, -0.3])
-        top = np.array([0.0, 0.1, 1.5])
-        bottom = np.array([-1.9, -1.1, -2.0])
-        # distribute the pointset
-        if self.comm.rank == 0:
-            initpts = np.vstack([vertex1, vertex2, left, right])
-        elif self.comm.rank == 1:
-            initpts = np.vstack([front, back, top])
-        elif self.comm.rank == 2:
-            initpts = np.vstack([bottom, left, right])
-        else:
-            raise ValueError("Too many procs")
-
-        distglobal = DVGeo.addPointSet(initpts, "mypts", cache_projections=False)
-        self.assertAlmostEqual(distglobal, 0.0, 8)
-
-        # evaluate the points and check that they match
-        DVGeo._updateModel()
-        DVGeo._updateProjectedPts()
-        self.assertTrue(DVGeo.pointSetUpToDate)
-        self.assertAlmostEqual(np.linalg.norm(initpts - DVGeo.pointSets["mypts"].proj_pts), 0.0, 10)
-
-        return DVGeo, initpts
-
-    def test_load_a_model(self):
-        # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeometryESP(csmFile)
-
-    def test_add_desvars(self):
-        # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
-        self.assertIsNotNone(DVGeo)
-
-        # add variables with a mix of optional arguments
-        DVGeo.addVariable("cubex0", lower=np.array([-10.0]), upper=np.array([10.0]), scale=0.1, dh=0.0001)
-        self.assertEqual(DVGeo.getNDV(), 1)
-        DVGeo.addVariable("cubey0")
-        self.assertEqual(DVGeo.getNDV(), 2)
-        DVGeo.addVariable("cubez0", lower=np.array([-10.0]), upper=np.array([10.0]))
-        self.assertEqual(DVGeo.getNDV(), 3)
-
-        # try to add a variable that isn't in the CSM file
-        with self.assertRaises(Error):
-            DVGeo.addVariable("cubew0")
-
-    def test_add_pointset(self):
-        DVGeo, initpts = self.setup_cubemodel()
-
-    def test_updated_points(self):
-        DVGeo, initpts = self.setup_cubemodel()
-
-        DVGeo.addVariable("cubey0")
-        DVGeo.setDesignVars({"cubey0": np.array([4.2000])}, updateJacobian=False)
-        npts = initpts.shape[0]
-        self.assertAlmostEqual(np.sum(DVGeo.pointSets["mypts"].proj_pts[:, 1] - initpts[:, 1]) / npts, 6.2, 10)
-        DVGeo.addVariable("cubedz")
-        DVGeo.setDesignVars({"cubedz": np.array([9.5])}, updateJacobian=False)
-        if self.comm.rank == 0:
-            self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2], 7.5)
-            self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 2], -2.0)
-
-    def testFullFD(self):
-        DVGeo, pts = self.setup_cubemodel()
-        ptSetName = "mypts"
-
-        funcSens, funcSensFD = manualTestFD(DVGeo, pts, ptSetName)
-
-        for x in DVGeo.getValues():
-            if self.comm.rank == 0:
-                print(f"{x} sum: {np.sum(funcSens[x])}")
-
-            else:
-                np.testing.assert_allclose(funcSens[x].T, funcSensFD[x], rtol=1e-3, atol=1e-5)
-
-
-@unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
 class TestPyGeoESP_BasicCube_Distributed_OneProcBlank(unittest.TestCase):
     N_PROCS = 4
 
@@ -921,8 +674,7 @@ class TestPyGeoESP_BasicCube_Distributed_OneProcBlank(unittest.TestCase):
 
     def setup_cubemodel(self):
         # load the box model and build the box model
-        csmFile = os.path.join(self.input_path, "../input_files/esp/box.csm")
-        DVGeo = DVGeometryESP(csmFile)
+        DVGeo = createDVGeo(self.input_path, geo="box")
         self.assertIsNotNone(DVGeo)
 
         # add a point set on the surface
@@ -1067,6 +819,412 @@ class TestPyGeoESP_BasicCube_Distributed_OneProcBlank(unittest.TestCase):
             # check that the DV dict hasn't changed
             for key in dvdict_cache:
                 self.assertAlmostEqual(np.sum(np.abs(DVGeo.DVs[key].value - dvdict_cache[key].value)), 0.0)
+
+
+@unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
+@parameterized_class(test_params)
+class TestPyGeoESP_PatchCube(unittest.TestCase):
+    # to be tested in serial and parallel automatically
+    N_PROCS = 1
+
+    def setUp(self):
+        # Store the path where this current script lives
+        # This all paths in the script are relative to this path
+        # This is needed to support testflo running directories and files as inputs
+        self.input_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def setup_cubemodel(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="box", isectPatch=True)
+        self.assertIsNotNone(DVGeo)
+
+        # add a point set on the surface
+        vertex1 = np.array([-2.0, -2.0, -2.0])
+        vertex2 = np.array([1.5, 1.5, 1.5])
+        left = np.array([-2.0, -1.1, -1.1])
+        right = np.array([1.5, -1.2, -0.1])
+        front = np.array([0.25, 1.5, 0.3])
+        back = np.array([1.2, -2.0, -0.3])
+        top = np.array([0.0, 0.1, 1.5])
+        bottom = np.array([-1.9, -1.1, -2.0])
+        initpts = np.vstack([vertex1, vertex2, left, right, front, back, top, bottom, left, right])
+        distglobal = DVGeo.addPointSet(initpts, "mypts", cache_projections=False, distributed=False)
+        self.assertAlmostEqual(distglobal, 0.0, 8)
+
+        # evaluate the points and check that they match
+        DVGeo._updateModel()
+        DVGeo._updateProjectedPts()
+        self.assertTrue(DVGeo.pointSetUpToDate)
+        self.assertAlmostEqual(np.linalg.norm(initpts - DVGeo.pointSets["mypts"].proj_pts), 0.0, 10)
+
+        return DVGeo, initpts
+
+    def test_load_a_model(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="box", isectPatch=True)
+
+    def test_save_cadfile(self):
+        write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".step")
+        DVGeo, initpts = self.setup_cubemodel()
+        if DVGeo.comm.rank == 0:
+            try:
+                os.remove(write_fullpath)
+            except OSError:
+                pass
+        DVGeo.writeCADFile(write_fullpath)
+        DVGeo.comm.barrier()
+        time.sleep(0.1)
+        self.assertTrue(os.path.exists(write_fullpath))
+
+        # check that bad file extension raises a Python error
+        with self.assertRaises(IOError):
+            DVGeo.writeCADFile("relpath.wrongext")
+
+    def test_write_csmfile(self):
+        DVGeo, initpts = self.setup_cubemodel()
+        write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".csm")
+        if DVGeo.comm.rank == 0:
+            try:
+                os.remove(write_fullpath)
+            except OSError:
+                pass
+        DVGeo.writeCSMFile(write_fullpath)
+        DVGeo.comm.barrier()
+        time.sleep(0.1)
+        self.assertTrue(os.path.exists(write_fullpath))
+        # check that bad file extension raises a Python error
+        with self.assertRaises(IOError):
+            DVGeo.writeCADFile("relpath.wrongext")
+
+    def test_add_desvars(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="box", isectPatch=True)
+        self.assertIsNotNone(DVGeo)
+
+        # add variables with a mix of optional arguments
+        DVGeo.addVariable("cubex0", lower=np.array([-10.0]), upper=np.array([10.0]), scale=0.1, dh=0.0001)
+        self.assertEqual(DVGeo.getNDV(), 1)
+        DVGeo.addVariable("cubey0")
+        self.assertEqual(DVGeo.getNDV(), 2)
+        DVGeo.addVariable("cubez0", lower=np.array([-10.0]), upper=np.array([10.0]))
+        self.assertEqual(DVGeo.getNDV(), 3)
+
+        # try to add a variable that isn't in the CSM file
+        with self.assertRaises(Error):
+            DVGeo.addVariable("cubew0")
+
+    def test_add_pointset(self):
+        DVGeo, initpts = self.setup_cubemodel()
+
+    def test_updated_points(self):
+        DVGeo, initpts = self.setup_cubemodel()
+
+        DVGeo.addVariable("cubey0")
+        DVGeo.setDesignVars({"cubey0": np.array([4.2000])}, updateJacobian=False)
+
+        npts = initpts.shape[0]
+        self.assertAlmostEqual(np.sum(DVGeo.pointSets["mypts"].proj_pts[:, 1] - initpts[:, 1]) / npts, 6.2, 10)
+        DVGeo.addVariable("cubedz")
+        DVGeo.setDesignVars({"cubedz": np.array([9.5])}, updateJacobian=False)
+
+        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2], 7.5)
+        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 2], -2.0)
+
+    def test_finite_precision(self):
+        DVGeo, initpts = self.setup_cubemodel()
+
+        DVGeo.addVariable("cubey0")
+        DVGeo.setDesignVars({"cubey0": np.array([4.2 + 1e-12])}, updateJacobian=False)
+        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 1] - 4.2, 1e-12, 15)
+        DVGeo.addVariable("cubedz")
+        DVGeo.setDesignVars({"cubedz": np.array([9.5 - 1e-12])}, updateJacobian=False)
+        self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2] - 7.5, -1e-12, 15)
+
+    def testFullFD(self):
+        DVGeo, pts = self.setup_cubemodel()
+        ptSetName = "mypts"
+
+        funcSens, funcSensFD = manualTestFD(DVGeo, pts, ptSetName)
+
+        for x in DVGeo.getValues():
+            if self.comm.rank == 0:
+                print(f"{x} sum: {np.sum(funcSens[x])}")
+
+            else:
+                np.testing.assert_allclose(funcSens[x].T, funcSensFD[x], rtol=1e-3, atol=1e-5)
+
+
+@unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
+class TestPyGeoESP_TestPyGeoESP_PatchCube_Distributed(unittest.TestCase):
+    N_PROCS = 3
+
+    def setUp(self):
+        # Store the path where this current script lives
+        # This all paths in the script are relative to this path
+        # This is needed to support testflo running directories and files as inputs
+        self.input_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.comm = MPI.COMM_WORLD
+
+    def setup_cubemodel(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="box", isectPatch=True)
+        self.assertIsNotNone(DVGeo)
+
+        # add a point set on the surface
+        # distri
+        vertex1 = np.array([-2.0, -2.0, -2.0])
+        vertex2 = np.array([1.5, 1.5, 1.5])
+        left = np.array([-2.0, -1.1, -1.1])
+        right = np.array([1.5, -1.2, -0.1])
+        front = np.array([0.25, 1.5, 0.3])
+        back = np.array([1.2, -2.0, -0.3])
+        top = np.array([0.0, 0.1, 1.5])
+        bottom = np.array([-1.9, -1.1, -2.0])
+        # distribute the pointset
+        if self.comm.rank == 0:
+            initpts = np.vstack([vertex1, vertex2, left, right])
+        elif self.comm.rank == 1:
+            initpts = np.vstack([front, back, top])
+        elif self.comm.rank == 2:
+            initpts = np.vstack([bottom, left, right])
+        else:
+            raise ValueError("Too many procs")
+
+        distglobal = DVGeo.addPointSet(initpts, "mypts", cache_projections=False)
+        self.assertAlmostEqual(distglobal, 0.0, 8)
+
+        # evaluate the points and check that they match
+        DVGeo._updateModel()
+        DVGeo._updateProjectedPts()
+        self.assertTrue(DVGeo.pointSetUpToDate)
+        self.assertAlmostEqual(np.linalg.norm(initpts - DVGeo.pointSets["mypts"].proj_pts), 0.0, 10)
+
+        return DVGeo, initpts
+
+    def test_load_a_model(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="box", isectPatch=True)
+
+    def test_add_desvars(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="box", isectPatch=True)
+        self.assertIsNotNone(DVGeo)
+
+        # add variables with a mix of optional arguments
+        DVGeo.addVariable("cubex0", lower=np.array([-10.0]), upper=np.array([10.0]), scale=0.1, dh=0.0001)
+        self.assertEqual(DVGeo.getNDV(), 1)
+        DVGeo.addVariable("cubey0")
+        self.assertEqual(DVGeo.getNDV(), 2)
+        DVGeo.addVariable("cubez0", lower=np.array([-10.0]), upper=np.array([10.0]))
+        self.assertEqual(DVGeo.getNDV(), 3)
+
+        # try to add a variable that isn't in the CSM file
+        with self.assertRaises(Error):
+            DVGeo.addVariable("cubew0")
+
+    def test_add_pointset(self):
+        DVGeo, initpts = self.setup_cubemodel()
+
+    def test_updated_points(self):
+        DVGeo, initpts = self.setup_cubemodel()
+
+        DVGeo.addVariable("cubey0")
+        DVGeo.setDesignVars({"cubey0": np.array([4.2000])}, updateJacobian=False)
+        npts = initpts.shape[0]
+        self.assertAlmostEqual(np.sum(DVGeo.pointSets["mypts"].proj_pts[:, 1] - initpts[:, 1]) / npts, 6.2, 10)
+        DVGeo.addVariable("cubedz")
+        DVGeo.setDesignVars({"cubedz": np.array([9.5])}, updateJacobian=False)
+        if self.comm.rank == 0:
+            self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2], 7.5)
+            self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 2], -2.0)
+
+    def testFullFD(self):
+        DVGeo, pts = self.setup_cubemodel()
+        ptSetName = "mypts"
+
+        funcSens, funcSensFD = manualTestFD(DVGeo, pts, ptSetName)
+
+        for x in DVGeo.getValues():
+            if self.comm.rank == 0:
+                print(f"{x} sum: {np.sum(funcSens[x])}")
+
+            else:
+                np.testing.assert_allclose(funcSens[x].T, funcSensFD[x], rtol=1e-3, atol=1e-5)
+
+
+@unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
+@parameterized_class(test_params)
+class TestPyGeoESP_TestPyGeoESP_PatchCross(unittest.TestCase):
+    # to be tested in serial and parallel automatically
+    N_PROCS = 1
+
+    def setUp(self):
+        # Store the path where this current script lives
+        # This all paths in the script are relative to this path
+        # This is needed to support testflo running directories and files as inputs
+        self.input_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def setup_planemodel(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="planes", isectPatch=True)
+
+        self.output = os.path.join(os.path.dirname(__file__), "testpatch")  # TODO
+        os.makedirs(self.output, exist_ok=True)
+
+        self.assertIsNotNone(DVGeo)
+
+        # add a point set on the surface
+        xyVertex1 = np.array([2.0, 2.0, 1.0])
+        xyVertex2 = np.array([1.0, 1.0, 1.0])
+        xyPt1 = np.array([1.25, 1.5, 1.0])
+        xyPt2 = np.array([1.75, 1.25, 1.0])
+
+        yzVertex1 = np.array([1.5, 1.0, 1.5])
+        yzVertex2 = np.array([1.5, 2.0, 0.5])
+        yzPt1 = np.array([1.5, 1.25, 1.25])
+        yzPt2 = np.array([1.5, 1.75, 0.5])
+
+        center1 = np.array([1.5, 1.0, 1.0])
+        center2 = np.array([1.5, 1.5, 1.0])
+
+        initpts = np.vstack([xyVertex1, xyVertex2, xyPt1, xyPt2, yzVertex1, yzVertex2, yzPt1, yzPt2, center1, center2])
+        self.xyPlaneIndices = np.array([0, 1, 2, 3])
+        self.yzPlaneIndices = np.array([4, 5, 6, 7])
+        self.centerIndices = np.array([8, 9])
+
+        distglobal = DVGeo.addPointSet(initpts, "mypts", cache_projections=False, distributed=False)
+        self.assertAlmostEqual(distglobal, 0.0, 8)
+
+        # evaluate the points and check that they match
+        DVGeo._updateModel()
+        DVGeo._updateProjectedPts()
+        self.assertTrue(DVGeo.pointSetUpToDate)
+        self.assertAlmostEqual(np.linalg.norm(initpts - DVGeo.pointSets["mypts"].proj_pts), 0.0, 10)
+
+        return DVGeo, initpts
+
+    def test_save_cadfile(self):
+        write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".step")
+        DVGeo, initpts = self.setup_planemodel()
+        if DVGeo.comm.rank == 0:
+            try:
+                os.remove(write_fullpath)
+            except OSError:
+                pass
+        DVGeo.writeCADFile(write_fullpath)
+        DVGeo.comm.barrier()
+        time.sleep(0.1)
+        self.assertTrue(os.path.exists(write_fullpath))
+
+        # check that bad file extension raises a Python error
+        with self.assertRaises(IOError):
+            DVGeo.writeCADFile("relpath.wrongext")
+
+    def test_write_csmfile(self):
+        DVGeo, initpts = self.setup_planemodel()
+        write_fullpath = os.path.join(self.input_path, "reg_tests/fullpath_" + str(self.N_PROCS) + ".csm")
+        if DVGeo.comm.rank == 0:
+            try:
+                os.remove(write_fullpath)
+            except OSError:
+                pass
+        DVGeo.writeCSMFile(write_fullpath)
+        DVGeo.comm.barrier()
+        time.sleep(0.1)
+        self.assertTrue(os.path.exists(write_fullpath))
+        # check that bad file extension raises a Python error
+        with self.assertRaises(IOError):
+            DVGeo.writeCADFile("relpath.wrongext")
+
+    def test_add_desvars(self):
+        # load the box model and build the box model
+        DVGeo = createDVGeo(self.input_path, geo="planes", isectPatch=True)
+        self.assertIsNotNone(DVGeo)
+
+        # add variables with a mix of optional arguments
+        DVGeo.addVariable("zPos", lower=np.array([-10.0]), upper=np.array([10.0]), scale=0.1, dh=0.0001)
+        self.assertEqual(DVGeo.getNDV(), 1)
+        DVGeo.addVariable("xPos")
+        self.assertEqual(DVGeo.getNDV(), 2)
+
+        # try to add a variable that isn't in the CSM file
+        with self.assertRaises(Error):
+            DVGeo.addVariable("yPos")
+
+    def test_add_pointset(self):
+        DVGeo, initpts = self.setup_planemodel()
+
+    def test_updated_points(self):
+        DVGeo, initpts = self.setup_planemodel()
+        npts = initpts.shape[0]
+
+        # for i, patch in enumerate(DVGeo.patchModel.patches):
+        #     patch.writeTecplot(f"{self.output}/surfOrig_{i+1}.dat")
+
+        # move the XY plane in z
+        DVGeo.addVariable("zPos")
+        DVGeo.setDesignVars({"zPos": np.array([0.9])}, updateJacobian=False)
+
+        # for i, patch in enumerate(DVGeo.patchModel.patches):  # TODO get rid of debug exporting
+        #     patch.writeTecplot(f"{self.output}/surfUpd1_{i+1}.dat")
+
+        points1 = deepcopy(DVGeo.pointSets["mypts"].proj_pts)
+
+        # check that XY plane and center intersection has moved in z but not in x or y
+        # self.assertAlmostEqual(points1[self.xyPlaneIndices, 2], 0.9 * np.ones(len(self.xyPlaneIndices)), 10)
+        # self.assertAlmostEqual(points1[self.centerIndices, 2], 0.9 * np.ones(len(self.centerIndices)), 10)
+
+        # check that YZ plane has moved in z but not in x or y (right?)
+
+        # check that none of the points have moved in x or y
+        # self.assertAlmostEqual(points1[:, 0], initpts[:, 0], 10)
+        # self.assertAlmostEqual(points1[:, 1], initpts[:, 1], 10)
+
+        # move the YZ plane in x
+        DVGeo.addVariable("xPos")
+        DVGeo.setDesignVars({"xPos": np.array([1.6])}, updateJacobian=False)
+        points2 = deepcopy(DVGeo.pointSets["mypts"].proj_pts)
+
+        # check that none of the points moved in y or z
+        # self.assertAlmostEqual(points2[:, 1], points1[:, 1], 10)
+        # self.assertAlmostEqual(points2[:, 2], points1[:, 2], 10)
+
+        # check that YZ plane and intersection moved in x
+        # self.assertAlmostEqual(points2[self.yzPlaneIndices, 0], 1.6 * np.ones(len(self.yzPlaneIndices)), 10)
+        # self.assertAlmostEqual(points2[self.centerIndices, 0], 1.6 * np.ones(len(self.centerIndices)), 10)
+
+        # check that the XY plane only moved in x
+
+        # for i, patch in enumerate(DVGeo.patchModel.patches):
+        #     patch.writeTecplot(f"{self.output}/surfUpd2_{i+1}.dat")
+
+        # self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2], 7.5)
+        print(DVGeo.pointSets["mypts"].proj_pts[1, 2])
+        # self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 2], -2.0)
+        print(DVGeo.pointSets["mypts"].proj_pts[0, 2])
+
+    # def test_finite_precision(self):
+    #     DVGeo, initpts = self.setup_planemodel()
+
+    #     DVGeo.addVariable("zPos")
+    #     DVGeo.setDesignVars({"zPos": np.array([0.85 + 1e-12])}, updateJacobian=False)
+    #     self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[0, 1] - 0.85, 1e-12, 15)
+    #     DVGeo.addVariable("xPos")
+    #     DVGeo.setDesignVars({"xPos": np.array([1.6 - 1e-12])}, updateJacobian=False)
+    #     self.assertAlmostEqual(DVGeo.pointSets["mypts"].proj_pts[1, 2] - 1.6, -1e-12, 15)
+
+    def testFullFD(self):
+        DVGeo, pts = self.setup_planemodel()
+        ptSetName = "mypts"
+
+        funcSens, funcSensFD = manualTestFD(DVGeo, pts, ptSetName)
+
+        for x in DVGeo.getValues():
+            if self.comm.rank == 0:
+                print(f"{x} sum: {np.sum(funcSens[x])}")
+
+            else:
+                np.testing.assert_allclose(funcSens[x].T, funcSensFD[x], rtol=1e-3, atol=1e-5)
 
 
 @unittest.skipUnless(mpiInstalled and ocsmInstalled, "MPI and pyOCSM are required.")
